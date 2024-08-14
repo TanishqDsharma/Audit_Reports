@@ -120,6 +120,34 @@ function test__Denial_Of_Service_____POC() public {
     }
 ```
 
+# GAS
+
+## G-1: Unchanged State variables should be declared constant or immutable.
+
+Reading from storage is much more expensive than reading from a constant or immutable variable.
+
+Instances:
+- `PuppyRaffle::raffleDuration` should be `immutable`
+- `PuppyRaffle::commanImageUri` should be `constant`
+- `PuppyRaffle::rareImageUri` should be `immutable`
+- `PuppyRaffle::legendaryImageUri` should be `immutable`
+
+## G-2: Storage Variables in loop should be cached 
+
+Everytime you call `player.length` you read from storage, as opposed to memory which is more gas efficient
+
+```diff
++ uint256 playerLength = players.length;
+-     for (uint256 i = 0; i < players.length - 1; i++) {
++     for (uint256 i = 0; i < playerLength - 1; i++) {
+-            for (uint256 j = i + 1; j < players.length; j++) {
++	     for (uint256 j = i + 1; j < playerLength; j++) {
+                require(players[i] != players[j], "PuppyRaffle: Duplicate player");
+            }
+        }
+```
+
+
 ## I-1: Solidity pragma should be specific, not wide
 
 Consider using a specific version of Solidity in your contracts instead of a wide version. For example, instead of `pragma solidity ^0.8.0;`, use `pragma solidity 0.8.0;`
@@ -145,3 +173,24 @@ solc frequently releases new compiler versions. Using an old version prevents ac
 **Recommendation**
 Deploy with a recent version of Solidity (at least 0.8.0) with no known severe issues.
 Use a simple pragma version that allows any of these versions. Consider using the latest version of Solidity for testing.
+
+## I-3: Missing checks for `address(0)` when assigning values to address state variables
+
+Check for `address(0)` when assigning values to address state variables.
+
+<details><summary>2 Found Instances</summary>
+
+
+- Found in src/PuppyRaffle.sol [Line: 62](src/PuppyRaffle.sol#L62)
+
+	```solidity
+	        feeAddress = _feeAddress;
+	```
+
+- Found in src/PuppyRaffle.sol [Line: 168](src/PuppyRaffle.sol#L168)
+
+	```solidity
+	        feeAddress = newFeeAddress;
+	```
+
+</details>
