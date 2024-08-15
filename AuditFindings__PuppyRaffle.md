@@ -1,4 +1,4 @@
-## [H-#] Rentrancy Attack in `PuppyRaffle::refund` allows entrant to drain raffle balance
+### [H-#] Rentrancy Attack in `PuppyRaffle::refund` allows entrant to drain raffle balance
 
 **Description:** The `PuppyRaffle::refund` function does not follow [CEI] and as a result enable participants to drain the contract balance.
 
@@ -120,7 +120,7 @@ contract ReentrancyAttacker {
 
 
 
-## [M-#] TITLE Looping through Players Array to check for duplicates in `PuppyRaffle::enterRaffle` is potential DOS(Denial Of Service), incrementing the gas cost for future entrance.
+### [M-#] TITLE Looping through Players Array to check for duplicates in `PuppyRaffle::enterRaffle` is potential DOS(Denial Of Service), incrementing the gas cost for future entrance.
 
 **Description:** The `PuppyRaffle::enterRaffle` function loops through the `players` array to check for duplicates. However, the longer the `PuppyRaffle::players` array is , the more checks new player will have to make. This means the gas cost for players who enter right when raffle starts will be drammatically lower than those who enters later.
 
@@ -240,10 +240,43 @@ function test__Denial_Of_Service_____POC() public {
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
     }
 ```
+# Low
+
+### L-1: `PuppyRaffle::getActivePlayerIndex` returns 0 for non-existent players and for players at index 0, causing a player at index 0 to incorrectly think that they have not entered the raffle.
+
+**Description:** If a player is in the  `PuppyRaffle::players` array at index 0, this will return index 0, but according to the natspec, it will also returns 0 if the player is not in the array.
+```solidity
+/// @return the index of the player in the array, if they are not active, it returns 0
+function getActivePlayerIndex(address player) external view returns (uint256) {
+
+        for (uint256 i = 0; i < players.length; i++) {
+            if (players[i] == player) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+```
+**Impact:**  Causing a player at index 0 to incorrectly think that they have not entered the raffle and attempt to enter the raffle again, wasting gas
+
+**Proof Of Concept:**
+
+1. Users enters the raffle, they are the first entrant
+2. `PuppyRaffle::getActivePlayerIndex` returns 0
+3. Users thinks they have not entered correctly due to the function documentation
+
+**Recommended Mitigation:** 
+The easiest recommendation is to revert if the player in not in the array instead of returning 0. 
+You could also reserve the 0th position for any competition, but a better solution might be to return an `int256` where the function returns -1 if the player is not active.
+
+
+
+
 
 # GAS
 
-## G-1: Unchanged State variables should be declared constant or immutable.
+### G-1: Unchanged State variables should be declared constant or immutable.
 
 Reading from storage is much more expensive than reading from a constant or immutable variable.
 
@@ -253,7 +286,7 @@ Instances:
 - `PuppyRaffle::rareImageUri` should be `immutable`
 - `PuppyRaffle::legendaryImageUri` should be `immutable`
 
-## G-2: Storage Variables in loop should be cached 
+### G-2: Storage Variables in loop should be cached 
 
 Everytime you call `player.length` you read from storage, as opposed to memory which is more gas efficient
 
@@ -268,8 +301,9 @@ Everytime you call `player.length` you read from storage, as opposed to memory w
         }
 ```
 
+# Informational
 
-## I-1: Solidity pragma should be specific, not wide
+### I-1: Solidity pragma should be specific, not wide
 
 Consider using a specific version of Solidity in your contracts instead of a wide version. For example, instead of `pragma solidity ^0.8.0;`, use `pragma solidity 0.8.0;`
 
@@ -284,7 +318,7 @@ Consider using a specific version of Solidity in your contracts instead of a wid
 
 </details>
 
-## I-2: Using an outdated version of Solidity is not recommended
+### I-2: Using an outdated version of Solidity is not recommended
 
 Please user a newer version like `0.8.18`
 
@@ -295,7 +329,7 @@ solc frequently releases new compiler versions. Using an old version prevents ac
 Deploy with a recent version of Solidity (at least 0.8.0) with no known severe issues.
 Use a simple pragma version that allows any of these versions. Consider using the latest version of Solidity for testing.
 
-## I-3: Missing checks for `address(0)` when assigning values to address state variables
+### I-3: Missing checks for `address(0)` when assigning values to address state variables
 
 Check for `address(0)` when assigning values to address state variables.
 
