@@ -301,6 +301,21 @@ Everytime you call `player.length` you read from storage, as opposed to memory w
         }
 ```
 
+### [H-2] Weak randomness in `PuppyRaffle::selectWinner` allows users to influence of predict the winner and influence or predict the winning puppy
+
+**Description:** Hashing `msg.sender`, `block.timestamp`, and `block.difficulty` together creates a predicatable final number. A predictable number is not a good random number. Malicious users can manipulate these values or know them ahead of time to choose the winner of the raffle themselves.
+
+*Note:* This means users could front-run this function and call `refund` if they see they are not the winner
+
+**Impact:** Any user can influence the winner of the raffle, winning the money and selecting the `rarest` puppy. Making the entire raffle worhtless if it becomes a gas war as to who wins the raffle 
+
+**Proof Of Concept:** 
+1. Validators can know ahead of time the `block.timestamp` and `block.difficulty` and use that to predict when/how to participate. See the [solidity blog on prevrandao](https://soliditydeveloper.com/prevrandao).  `block.difficulty` was recently replaced with prevrandao.
+2. Users can mine/manipulate their `msg.sender` value to result in their address being used to generate the winner.
+3. Users can revert their `selectWinner` transaction if they dont like the winner or resulting puppy.
+**Recommneded Mitigation:**
+Consider using an oracle for your randomness like [Chainlink VRF](https://docs.chain.link/vrf/v2/introduction).
+
 # Informational
 
 ### I-1: Solidity pragma should be specific, not wide
@@ -349,3 +364,15 @@ Check for `address(0)` when assigning values to address state variables.
 	```
 
 </details>
+
+### I-4: `PuppyRaffle::SelectWinner` should follow CEI
+
+Its best to keep the code clean and follow CEI (Check, Effects and Interactions)
+```diff
+- (bool success,) = msg.sender.call{value: prizePool}("");
+-  require(success, "PuppyRaffle: Failed to send prize pool to winner");
+  _safeMint(Winner, tokenId);
++ (bool success,) = msg.sender.call{value: prizePool}("");
++  require(success, "PuppyRaffle: Failed to send prize pool to winner");
+```
+
