@@ -138,6 +138,103 @@ Using on-chain values as a randomness seed is a [well-known attack vector](https
 
 **Recommended Mitigation:** Consider using an oracle for your randomness like [Chainlink VRF](https://docs.chain.link/vrf/v2/introduction).
 
+### [H-3] Integer Overflow of `PuppyRaffle::totalFees` loses fees
+
+**Description:** In solidity versions prior to `0.8.0` integers were subject to overflows.
+
+```solidity
+uint64 myVar = type(uint64).max
+//18,446,744,073,709,551,615
+myVar = myVar + 1
+// myVar will be 0
+```
+
+**Impact:** In `PuppyRaffle::selectWinner`, `totalFees` are accumalated for the fee address `feeAddress` to collect later in the `PuppyRaffle::withdrawFees`. However, if the total fees variable overflows, the `feeAddress` may not collect the correct ammount of fees, leaving fees permanently stuck in the contract.
+
+**Proof Of Concept:**
+1. We conclude the raffle of 4 players
+2. We then have 89 players enter a new raffle, and conclude the raffle
+3. `totalFees` will be:
+```solidity
+totalFees = totalFees + uint64(fee);
+// substituted
+totalFees = 800000000000000000 + 17800000000000000000;
+// due to overflow, the following is now the case
+totalFees = 153255926290448384;
+```
+4. You will not be able to withdraw, due to the line in `PuppyRaffle::withdrawFees`
+```solidity
+require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
+```
+Although you could use selfdestruct to send ETH to this contract in order for the values to match and withdraw the fees, this is clearly not what the protocol is intended to do. At somepoint there will to much balance in the contract that the above will be impossible to hit.
+
+<details>
+<summary>Proof Of Code</summary>
+Place this into the `PuppyRaffleTest.t.sol` file.
+
+```javascript
+function testTotalFeesOverflow() public playersEntered {
+        // We finish a raffle of 4 to collect some fees
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+        puppyRaffle.selectWinner();
+        uint256 startingTotalFees = puppyRaffle.totalFees();
+        // startingTotalFees = 800000000000000000
+
+        // We then have 89 players enter a new raffle
+        uint256 playersNum = 89;
+        address[] memory players = new address[](playersNum);
+        for (uint256 i = 0; i < playersNum; i++) {
+            players[i] = address(i);
+        }
+        puppyRaffle.enterRaffle{value: entranceFee * playersNum}(players);
+        // We end the raffle
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+
+        // And here is where the issue occurs
+        // We will now have fewer fees even though we just finished a second raffle
+        puppyRaffle.selectWinner();
+
+        uint256 endingTotalFees = puppyRaffle.totalFees();
+        console.log("ending total fees", endingTotalFees);
+        assert(endingTotalFees < startingTotalFees);
+
+        // We are also unable to withdraw any fees because of the require check
+        vm.prank(puppyRaffle.feeAddress());
+        vm.expectRevert("PuppyRaffle: There are currently players active!");
+        puppyRaffle.withdrawFees();
+    }
+```
+</details>
+
+**Recommended Mitigation:** There are a few recommended mitigations here.
+
+1. Use a newer version of Solidity that does not allow integer overflows by default.
+
+```diff 
+- pragma solidity ^0.7.6;
++ pragma solidity ^0.8.18;
+```
+
+Alternatively, if you want to use an older version of Solidity, you can use a library like OpenZeppelin's `SafeMath` to prevent integer overflows. 
+
+2. Use a `uint256` instead of a `uint64` for `totalFees`. 
+
+```diff
+- uint64 public totalFees = 0;
++ uint256 public totalFees = 0;
+```
+
+3. Remove the balance check in `PuppyRaffle::withdrawFees` 
+
+```diff
+- require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
+```
+
+We additionally want to bring your attention to another attack vector as a result of this line in a future finding.
+
+
 ### [M-#] TITLE Looping through Players Array to check for duplicates in `PuppyRaffle::enterRaffle` is potential DOS(Denial Of Service), incrementing the gas cost for future entrance.
 
 **Description:** The `PuppyRaffle::enterRaffle` function loops through the `players` array to check for duplicates. However, the longer the `PuppyRaffle::players` array is , the more checks new player will have to make. This means the gas cost for players who enter right when raffle starts will be drammatically lower than those who enters later.
