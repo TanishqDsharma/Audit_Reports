@@ -356,6 +356,41 @@ function test__Denial_Of_Service_____POC() public {
     }
 ```
 
+### [M-2] Balance check on `PuppyRaffle::withdrawFees` enables griefers to selfdestruct a contract to send ETH to the raffle, blocking withdrawals
+
+**Description:** The `PuppyRaffle::withdrawFees` function checks the `totalFees` equals the ETH balance of the contract (`address(this).balance`). Since this contract doesn't have a `payable` fallback or `receive` function, you'd think this wouldn't be possible, but a user could `selfdesctruct` a contract with ETH in it and force funds to the `PuppyRaffle` contract, breaking this check. 
+
+```javascript
+    function withdrawFees() external {
+@>      require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
+        uint256 feesToWithdraw = totalFees;
+        totalFees = 0;
+        (bool success,) = feeAddress.call{value: feesToWithdraw}("");
+        require(success, "PuppyRaffle: Failed to withdraw fees");
+    }
+```
+
+**Impact:** This would prevent the `feeAddress` from withdrawing fees. A malicious user could see a `withdrawFee` transaction in the mempool, front-run it, and block the withdrawal by sending fees. 
+
+**Proof of Concept:**
+
+1. `PuppyRaffle` has 800 wei in it's balance, and 800 totalFees.
+2. Malicious user sends 1 wei via a `selfdestruct`
+3. `feeAddress` is no longer able to withdraw funds
+
+**Recommended Mitigation:** Remove the balance check on the `PuppyRaffle::withdrawFees` function. 
+
+```diff
+    function withdrawFees() external {
+-       require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
+        uint256 feesToWithdraw = totalFees;
+        totalFees = 0;
+        (bool success,) = feeAddress.call{value: feesToWithdraw}("");
+        require(success, "PuppyRaffle: Failed to withdraw fees");
+    }
+```
+
+
 ### [M-3] Unsafe cast of `PuppyRaffle::fee` loses fees
 
 **Description:** In `PuppyRaffle::selectWinner` their is a type cast of a `uint256` to a `uint64`. This is an unsafe cast, and if the `uint256` is larger than `type(uint64).max`, the value will be truncated. 
@@ -471,10 +506,6 @@ function getActivePlayerIndex(address player) external view returns (uint256) {
 **Recommended Mitigation:** 
 The easiest recommendation is to revert if the player in not in the array instead of returning 0. 
 You could also reserve the 0th position for any competition, but a better solution might be to return an `int256` where the function returns -1 if the player is not active.
-
-
-
-
 
 # GAS
 
@@ -595,3 +626,32 @@ uint256 public constant PRIZE_POOL_PERCENTAGE = 80;
 uint256 public constant FEE_PERCENTAGE = 20;
 uint256 public constant POOL_PRECISION = 100;
 ```
+### [I-6] Unchanged variables should be constant or immutable 
+
+Constant Instances:
+```
+PuppyRaffle.commonImageUri (src/PuppyRaffle.sol#35) should be constant 
+PuppyRaffle.legendaryImageUri (src/PuppyRaffle.sol#45) should be constant 
+PuppyRaffle.rareImageUri (src/PuppyRaffle.sol#40) should be constant 
+```
+
+Immutable Instances:
+
+```
+PuppyRaffle.raffleDuration (src/PuppyRaffle.sol#21) should be immutable
+```
+
+### [I-7] Test Coverage 
+
+**Description:** The test coverage of the tests are below 90%. This often means that there are parts of the code that are not tested.
+
+```
+| File                               | % Lines        | % Statements   | % Branches     | % Funcs       |
+| ---------------------------------- | -------------- | -------------- | -------------- | ------------- |
+| script/DeployPuppyRaffle.sol       | 0.00% (0/3)    | 0.00% (0/4)    | 100.00% (0/0)  | 0.00% (0/1)   |
+| src/PuppyRaffle.sol                | 82.46% (47/57) | 83.75% (67/80) | 66.67% (20/30) | 77.78% (7/9)  |
+| test/auditTests/ProofOfCodes.t.sol | 100.00% (7/7)  | 100.00% (8/8)  | 50.00% (1/2)   | 100.00% (2/2) |
+| Total                              | 80.60% (54/67) | 81.52% (75/92) | 65.62% (21/32) | 75.00% (9/12) |
+```
+
+**Recommended Mitigation:** Increase test coverage to 90% or higher, especially for the `Branches` column. 
