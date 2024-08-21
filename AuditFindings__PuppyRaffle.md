@@ -1,4 +1,4 @@
-### [H-#] Rentrancy Attack in `PuppyRaffle::refund` allows entrant to drain raffle balance
+### [H-1] Rentrancy Attack in `PuppyRaffle::refund` allows entrant to drain raffle balance
 
 **Description:** The `PuppyRaffle::refund` function does not follow [CEI] and as a result enable participants to drain the contract balance.
 
@@ -118,7 +118,25 @@ contract ReentrancyAttacker {
 -        emit RaffleRefunded(playerAddress);
 ```
 
+### [H-2] Weak Randomness in `PuppyRaffle::selectWinner` allows users to influence or predict the winner and influence or predict the winning puppy.
 
+**Description:** Hashing `msg.sender`, `block.timestamp` and `block.difficulty` together created a predictable final number. A predictable number is not a good random number. Malicious users can manipulate these values or known these ahead of time to choose the winner of the raffle themselves.
+
+*Note:* Users can front-run this function and call `refund` if they see they are not a winner
+
+**Impact:** Any user can influence the winner of the raffle, winning the money and selecting the `rarest` puppy
+
+**Proof of Concept:** 
+
+There are a few attack vectors here. 
+
+1. Validators can know ahead of time the `block.timestamp` and `block.difficulty` and use that knowledge to predict when / how to participate. See the [solidity blog on prevrando](https://soliditydeveloper.com/prevrandao) here. `block.difficulty` was recently replaced with `prevrandao`.
+2. Users can mine/manipulate the `msg.sender` value to result in their address being used to generate the winner.
+3. User can revert there `selectWinner` transaction if they don't like the winner or resulting puppy
+
+Using on-chain values as a randomness seed is a [well-known attack vector](https://betterprogramming.pub/how-to-generate-truly-random-numbers-in-solidity-and-blockchain-9ced6472dbdf) in the blockchain space.
+
+**Recommended Mitigation:** Consider using an oracle for your randomness like [Chainlink VRF](https://docs.chain.link/vrf/v2/introduction).
 
 ### [M-#] TITLE Looping through Players Array to check for duplicates in `PuppyRaffle::enterRaffle` is potential DOS(Denial Of Service), incrementing the gas cost for future entrance.
 
@@ -376,3 +394,20 @@ Its best to keep the code clean and follow CEI (Check, Effects and Interactions)
 +  require(success, "PuppyRaffle: Failed to send prize pool to winner");
 ```
 
+### I-5: Use of magic numbers is discouraged
+
+It can be confusing to see number literals in codebase, and its much more readable if the numbers are given a name
+
+Examples:
+
+```solidity
+	uint256 prizePool = (totalAmountCollected*80)/100;
+	uint256 fee = (totalAmountCollected*20)/100;
+```
+Instead, use like this:
+
+```solidity
+uint256 public constant PRIZE_POOL_PERCENTAGE = 80;
+uint256 public constant FEE_PERCENTAGE = 20;
+uint256 public constant POOL_PRECISION = 100;
+```
