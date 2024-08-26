@@ -1,6 +1,36 @@
 # High
 
-### [H-1] `TSwapPool::Deposit` is missing deadline check causing transactions to complete even after the deadline
+### [H-2] Incorrect fee calculation in `TSwapPool::getInputAmountBasedOnOutput` causes protocol to take too many tokens from users resulting in lost fees
+
+**Description:**
+The `getInputAmountBasedOnOutput` function is intended to calculate the amount of tokens a user should deposit given an amount of output tokens. However, the function currently miscalculates the resulting amount. When calculating the fee, it scales the amount by 10_000 instead of 1_000.
+
+**Impact:** Protocol takes more fees than expected from users.
+
+**Recommended Mitigation:**
+
+```diff
+function getInputAmountBasedOnOutput(
+        uint256 outputAmount,
+        uint256 inputReserves,
+        uint256 outputReserves
+    )
+        public
+        pure
+        revertIfZero(outputAmount)
+        revertIfZero(outputReserves)
+        returns (uint256 inputAmount)
+    {
+        return
+-            ((inputReserves * outputAmount) * 10000) /
++ 	     ((inputReserves * outputAmount) * 1000) /
+            ((outputReserves - outputAmount) * 997);
+    }
+```
+
+# Medium
+
+### [M-1] `TSwapPool::Deposit` is missing deadline check causing transactions to complete even after the deadline
 
 **Description:**
 The deposit function accepts a deadline parameter which according to the documentation is "The deadline for the transaction to be completed by." However, this parameter is never used.
@@ -25,7 +55,47 @@ function deposit(
 +	revertIfDeadlinePassed(deadline)
         returns (uint256 liquidityTokensToMint)
 ```
+# Low
 
+### [L-1] `TSwapPool::LiquidityAdded` event has parameters out of order
+
+**Description:** When `Liquidity Added` event is emitted in the `TSwapPool::_addLiquidityMintAndTransfer` function, it logs values in an incorrect order.
+The `poolTokensToDeposit` value should go in the third parameter position, whereas the `wethToDeposit` value should go second.
+
+**Impact:** Event Emission is incorrect, leading to offchain fucntions potentially malfunctioning.
+
+**Proof Of Concept:**
+
+```diff
+- emit LiquidityAdded(msg.sender, poolTokensToDeposit, wethToDeposit);
++ emit LiquidityAdded(msg.sender, wethDeposit, poolTokensToDeposit);
+```
+
+### [L-2] Default Value returned by `TSwapPool::swapExactInput` results in incorrect return value given
+
+**Description:** The `swapExactInput` function is expected to return the actual amount of tokens bought by the caller. However, while it declares the named return `output` it is never assigned a value nor uses an explicit return statement
+
+**Impact:** The return value will always be zero giving incorrect infromation to the caller.
+
+
+**Recommended Mitigations:**
+```diff
+uint256 inputReserves = inputToken.balanceOf(address(this));
+        uint256 outputReserves = outputToken.balanceOf(address(this));
+
+-        uint256 outputAmount = getOutputAmountBasedOnInput(inputAmount, inputReserves, outputReserves);
++        output = getOutputAmountBasedOnInput(inputAmount, inputReserves, outputReserves);
+
+
+-        if (outputAmount < minOutputAmount) {
+-            revert TSwapPool__OutputTooLow(outputAmount, minOutputAmount);}
++ 	 if (output < minOutputAmount) {
++            revert TSwapPool__OutputTooLow(output, minOutputAmount);}
+
+
+-        _swap(inputToken, inputAmount, outputToken, outputAmount);
++        _swap(inputToken, inputAmount, outputToken, output);
+```
 # Informational
 
 ### [I-1] `PoolFactory::PoolFactory__PoolDoesNotExist` error is not used and should be removed
