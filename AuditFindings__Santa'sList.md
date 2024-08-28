@@ -40,3 +40,36 @@ function testAnyoneCanCallcheckList() public {
         emit CheckedOnce(person, status);
     }
 ```
+
+### [H-2] All addresses are being considered `NICE` by default and resulting in eligble to claim nft from the `SantasList::collectPresent` function 
+
+**Description:** Any address that is part of SantasList contract is having default status of `NICE` which will allow them to claim NFT by using the  `SantasList::collectPresent` function. This is due to the fact that if there's no default value defined for enum then the value at 0th position will be taken as default and will be used and in this case the default value is `NICE`.
+
+**Impact:** This impacts the ablity of the system to distribute the prices. Since, everyonr has the `NICE` status by default anyone can claim the NFT even the users that Santa intended to be on NAUGHTY.
+
+**Proof of Concept:**
+
+```solidity
+
+function testAnyoneCanClaimPresent() public{
+        vm.startPrank(user);
+        vm.warp(santasList.CHRISTMAS_2023_BLOCK_TIME()+1);
+        santasList.collectPresent();
+        vm.stopPrank();
+    }
+
+```
+
+**Recommended Mitigation:** This issue can be resolved by updating the `SantasList::Status` enum, to have its first value or value at 0th index to be `UNKNOWN`. This will ensure all the users have the intial status as `UNKNOWN` and wont be able to claim the NFT from `SantasList::collectPresent` function 
+
+```diff
+enum Status {
+-        NICE,
++       UNKNOWN,
+        EXTRA_NICE,
+        NAUGHTY,
+-        NOT_CHECKED_TWICE
++        NICE
+    }
+```
+
