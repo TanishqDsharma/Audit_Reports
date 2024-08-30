@@ -399,3 +399,70 @@ Consider adding a time window for present collection rather than relying on a si
 ```solidity
 +       if (block.timestamp < CHRISTMAS_2023_BLOCK_TIME - 1 days || block.timestamp > CHRISTMAS_2023_BLOCK_TIME + 1 days) {
 ```
+
+### [L-2] Incompatibility of Soliidty 0.8.22 with Arbitrum: Deployment failures due to unsupported PUSH0 Opcode
+
+**Description:** The documentation mentions that the contract is going to be deployed on Arbitrum.
+
+```solidity
+- Solc Version: 0.8.22
+- Chain(s) to deploy contract to: 
+  - Arbitrum
+- Tokens
+  - `SantaToken`
+```
+
+The Solidity files use `pragma solidity 0.8.22;`, which, when compiled, utilizes the opcode PUSH0. This opcode is not supported on the Arbitrum network.
+
+<https://docs.arbitrum.io/for-devs/concepts/differences-between-arbitrum-ethereum/solidity-support>
+
+**Impact:**
+Prevents the deployment of contracts within the desired network for the project.
+
+**Proof Of Concept:**
+In the arbitrum one documentation we can find references to the versions supported by this network: 
+<https://docs.arbitrum.io/for-devs/concepts/differences-between-arbitrum-ethereum/solidity-support>
+
+**Recommended Mitigations:**
+It is strongly recommended to use network-compatible versions of solidity
+
+### [L-3] Oversized Contract will fail the deployment
+
+**Description:**
+
+`SantasList.sol:SantasList` contract is oversized (56.43 kB). This is due to the fact that the constant variable `TOKEN_URI` is stored in the bytecode, which is `51373` characters in length. (Token URI is a nested Base64 encoding which exceeds the deployable bytecode size for a single contract.)
+
+Oversized contract can't be deployed.
+
+```
+forge build --sizes
+[⠒] Compiling...
+[⠊] Compiling 2 files with 0.8.22
+[⠒] Solc 0.8.22 finished in 1.85s
+Compiler run successful!
+| Contract       | Size (kB) | Margin (kB) |
+|----------------|-----------|-------------|
+| Math           | 0.086     | 24.49       |
+| MockERC20      | 3.69      | 20.886      |
+| MockERC721     | 3.827     | 20.749      |
+| SantaToken     | 3.324     | 21.252      |
+| SantasList     | 56.43     | -31.854     |
+| SignedMath     | 0.086     | 24.49       |
+| StdStyle       | 0.086     | 24.49       |
+| Strings        | 0.086     | 24.49       |
+| TokenUri       | 51.615    | -27.039     |
+| console        | 0.086     | 24.49       |
+| console2       | 0.086     | 24.49       |
+| safeconsole    | 0.086     | 24.49       |
+| stdError       | 0.592     | 23.984      |
+| stdJson        | 0.086     | 24.49       |
+| stdMath        | 0.086     | 24.49       |
+| stdStorage     | 0.086     | 24.49       |
+| stdStorageSafe | 0.086     | 24.49       |
+```
+
+**Impact:**
+Contract can't be deployed due to the `TOKEN_URI` size.
+
+**Recommended Mitigations:**
+`TOKEN_URI` should be modified to prevent the oversized contract. Ideally, this can be an `ipfs` url, which will be shorter.
