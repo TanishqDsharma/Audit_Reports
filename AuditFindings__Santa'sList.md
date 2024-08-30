@@ -290,3 +290,112 @@ This issue is considered high because it presents a significant risk of sensitiv
 
 * Remove the test from the test suite
 * Always used 3rd party programs on the system with caution.
+
+# Medium 
+
+### [M-1] `SantasList::PURCHASED_PRESENT_COST` constant is never used and `SantasList::buyPresent` function buys the present at a cheaper rate
+
+**Description:** The `SantasList::PURCHASED_PRESENT_COST` constant describes the price to purchase the present but this is never used in the code, instead the `SantasList::buyPresent` function gets called it burn `1e18` token to buy the present instead of `2e18` as defined in the `SantasList::PURCHASED_PRESENT_COST` constant.
+
+```solidity
+function buyPresent(address presentReceiver) external {
+@>  i_santaToken.burn(presentReceiver);
+    _mintAndIncrement();
+}
+```
+
+```solidity
+ function burn(address from) external {
+        if (msg.sender != i_santasList) {
+            revert SantaToken__NotSantasList();
+        }
+@>        _burn(from, 1e18); 
+    }
+```
+
+**Impact:**
+Protocol mentions that user should be able to buy NFT for 2e18 amount of SantaToken but users can buy NFT for their friends by burning only 1e18 tokens instead of 2e18, thus NFT can be bought at much cheaper rate which is half of the true amount that was expected to buy NFT.
+
+**Recommeded Mitigation:**
+
+In `SantasList::buyPresent` function 
+
+```diff
+function buyPresent(address presentReceiver) external {
+-   i_santaToken.burn(presentReceiver);
++   i_santaToken.burn(presentReceiver, PURCHASED_PRESENT_COST);
+    _mintAndIncrement();
+}
+```
+
+Instead of hard-coding the amount of value to burn use an argument to specify the amount of value that needs to burned to buy the present.
+
+```diff
+- function burn(address from) external {
++ function burn(address from,uint256 amount) external {
+        if (msg.sender != i_santasList) {
+            revert SantaToken__NotSantasList();
+        }
+-        _burn(from, 1e18);
++        _burn(from, amount);
+    }
+}
+```
+
+# Low
+
+###[L-1] `SantasList::collectPresent()` function can be called anytime after christmas
+
+**Description:** The documentations specifies that the christmas present should only be collectible with 24 hours before or after christmas. But the present can be minted at anytime after christmas.
+
+```solidity
+function collectPresent() external {
+@>        if (block.timestamp < CHRISTMAS_2023_BLOCK_TIME) {
+            revert SantasList__NotChristmasYet();
+        }
+        if (balanceOf(msg.sender) > 0) {
+            revert SantasList__AlreadyCollected();
+        }
+        if (s_theListCheckedOnce[msg.sender] == Status.NICE && s_theListCheckedTwice[msg.sender] == Status.NICE) {
+            _mintAndIncrement();
+            return;
+        } else if (
+            s_theListCheckedOnce[msg.sender] == Status.EXTRA_NICE
+                && s_theListCheckedTwice[msg.sender] == Status.EXTRA_NICE
+        ) {
+            _mintAndIncrement();
+            i_santaToken.mint(msg.sender);
+            return;
+        }
+        revert SantasList__NotNice();
+    }
+```
+
+**Impact:** This breaks the intended use the protocol. Since the protocol mentions that the present should be collected  with 24 hours before or after christmas but this is getting failed.
+
+**Proof Of Concept:**
+
+```solidity
+function testCollectingPresentAfterChristmas() public{
+        vm.startPrank(santa);
+        santasList.checkList(user, SantasList.Status.NICE);
+        santasList.checkTwice(user, SantasList.Status.NICE);
+        vm.stopPrank();
+
+        vm.warp(1703900189); // Saturday, 30 December 2023 01:36:29
+
+        vm.startPrank(user);
+        santasList.collectPresent();
+        assertEq(santasList.balanceOf(user), 1);
+        vm.stopPrank();
+}
+```
+
+**Recommeded Mitigation:**
+Consider adding a time window for present collection rather than relying on a single timestamp check.
+
+* Update the conditon to allow the claim of present only during 24 hrs before or after christmas.
+
+```solidity
++       if (block.timestamp < CHRISTMAS_2023_BLOCK_TIME - 1 days || block.timestamp > CHRISTMAS_2023_BLOCK_TIME + 1 days) {
+```
