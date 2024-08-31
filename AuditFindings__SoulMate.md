@@ -128,3 +128,43 @@ function testTotalSouls() public{
 **Recommended Mitigations:**
 1. Prevent Self-Pairing: Implement checks within the minting function to prevent users from being paired with themselves
 2. Consider maintaining a separate counter for active couples.
+
+
+### [L-3] Incorrect Data Emitted from events in `LoveToken`
+
+**Description:**
+
+`LoveToken::AirdropInitialized` and `LoveToken::StakingInitialized` events both emits incorrect data. The event data indicates that the parameters passed should be `airdropContract` and `stakingContract`, respectively. Still, the function emits both events with the parameter `managerContract`, resulting in inaccurate event logs.
+
+```solidity
+ function initVault(address managerContract) public {
+        if (msg.sender == airdropVault) {
+            _mint(airdropVault, 500_000_000 ether);
+            approve(managerContract, 500_000_000 ether);
+@>            emit AirdropInitialized(managerContract);
+        } else if (msg.sender == stakingVault) {
+            _mint(stakingVault, 500_000_000 ether);
+            approve(managerContract, 500_000_000 ether);
+@>            emit StakingInitialized(managerContract);
+        } else revert LoveToken__Unauthorized();
+    }
+```
+
+**Impact:**
+The incorrect event data poses a challenge for developers and external systems relying on event logs, as the information provided does not accurately reflect the initialized contracts. This discrepancy may result in confusion and hinder proper tracking of contract initialization events.
+
+**Recommended Mitigations:**
+Update the `initVault` function to emit both the `AirdropInitialized` and `StakingInitialized` events with the correct parameters, reflecting the addresses of the corresponding contracts (`airdropContract` and `stakingContract`).
+
+### [L-4] `_mint` function is being used for minting NFT instead of `_safeMint`
+
+**Description:** It's recommended to use `_safeMint` instead of `_mint` function when minting an NFT. If a soulmate is a smart contract address that doesn't support ERC721 standard, the NFT can be frozen in the contract.
+
+**Impact:**
+
+The Soulmate NFT can be frozen in the receiver contract.
+
+**Recommended Mitigation:**
+
+Use `_safeMint` instead of `_mint`, to check if receiver address supports ERC721's `onERC721Received` implementation.
+
