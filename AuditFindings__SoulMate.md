@@ -1,3 +1,27 @@
+# High
+
+### [H-1] Incorrect Calcluation of timestamp in `Staking::lastClaim` mapping. The`Staking::claimRewards` calculates `lastClaim` of a user based on their soulmate nft creation timestamp instead of staking timestamp leading to incorrect staking rewards payout.
+
+**Description:** When a user claims rewards for the first time, the `lastClaim` timestamp is incorrectly set to the creation timestamp of the user's soulmate NFT
+
+```solidity
+       if (lastClaim[msg.sender] == 0) {
+  @>          lastClaim[msg.sender] = soulmateContract.idToCreationTimestamp(
+                soulmateId );
+```
+
+So, when the user tries to claim the rewards the first time this `lastClaim` is set to the timestamp when the soulmate NFT was minted, not when the user staked the tokens. This results in incorrect calculation of the reward amount.
+
+**Impact:** Since, the rewards are being calculated incorrectly users will receive extra payout.
+
+**Proof Of Concept:**
+
+```solidity
+```
+
+**Recommended Mitigation**
+
+
 # Medium
 
 ### [M-1] Users Can Couple with themselves
