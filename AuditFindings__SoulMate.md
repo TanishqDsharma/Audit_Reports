@@ -1,3 +1,88 @@
+# Medium
+
+### [M-1] Users Can Couple with themselves
+
+**Description:** Instead of finding an address thats different from user so that he/she can couple with other address, the user can couple with themselves and claim the tokens.
+
+**Impact:**
+The documentation of the protocol states that there should be a couple to claim the `loveTokens`, but since the user can couple with himself and claim the `loveTokens` this defeats the whole logic of the protocol.
+
+**Proof Of Concept:**
+
+Add the below test to your testsuite:
+
+```solidity
+ function test_UserCanCoupleThemselvesAndClaim() public{
+        console.log("Soulmate1 is having address:",soulmate1);
+        vm.startPrank(soulmate1);
+        soulmateContract.mintSoulmateToken();
+        soulmateContract.mintSoulmateToken();
+        vm.stopPrank();
+        console.log("Soulmate of Soulmate1 is:",soulmateContract.soulmateOf(soulmate1));
+        vm.warp(2); 
+
+        vm.prank(soulmate1);
+        airdropContract.claim();
+        console.log("Balance of LoveToken is:",loveToken.balanceOf(soulmate1));}
+```
+
+**Recommended Mitigation:**
+
+Add the below line to conditional statement in ``Soulmate::mintSoulmateToken`` line 75:
+
+```diff
+else if (soulmate2 == address(0)) {
++          require(idToOwners[nextID][0] != msg.sender, "You cant couple with yourself!");	            
+            idToOwners[nextID][1] = msg.sender;
+            // Once 2 soulmates are reunited, the token is minted
+            ownerToId[msg.sender] = nextID;
+            soulmateOf[msg.sender] = soulmate1;
+            soulmateOf[soulmate1] = msg.sender;
+            idToCreationTimestamp[nextID] = block.timestamp;
+```
+
+### [M-2] `Soulmate::writeMessageInSharedSpace` can be used by anyone when NFT ID is `0`
+
+**Description:** Since, `Soulmate::ownerToId` returns the soulmate NFT id that is associated with the soulmate participating in the contract but it return 0 as id if the user has not participated in the protocol. We know that  `Soulmate::nextID` starts from `0`, making the NFTId `0` and is assigned to soulmates, but `Soulmate::ownerToId` returning 0 for non-soulmates user lead to potential loss of soulmates whose id is actually 0 as well as allows the non-soulmates users to enjoy the same benefits (of Airdrop & Staking), soulmates with id = 0 are enjoying. This also maks the `Soulmate::writeMessageInSharedSpace` vulnerable to allow anybody to write a message to `soulmates` who own `nextID` `0`,
+
+
+**Impact:** Non-Soulmate users can claim tokens from airdrop and stake tokens.
+
+**Proof Of Concept:**
+
+Add The below Test in  `Airdrop.t.sol`
+
+```solidity
+ function test_AnyoneCanClaimIfNFTId0() public {
+        _mintOneTokenForBothSoulmates();
+        
+        address hater = makeAddr("HATER");
+        console.log("Before the claim hater is having love tokens =",loveToken.balanceOf(hater));
+
+        vm.prank(hater);
+        vm.warp(10 weeks);
+        airdropContract.claim();
+
+        assert(loveToken.balanceOf(hater)>0);
+        console.log("After the claim hater is having love tokens = ",loveToken.balanceOf(hater));
+    }
+```
+
+Add The below Test in  `Soulmate.t.sol`
+
+```solidity
+    function test_AnyoneCanWriteMessageIfNFTID0() public {
+            _mintOneTokenForBothSoulmates();
+            address hater = makeAddr("HATER");
+            vm.prank(hater);
+            soulmateContract.writeMessageInSharedSpace("I dont Love U anymore .......");
+             vm.prank(soulmate2);
+            string memory message = soulmateContract.readMessageInSharedSpace();
+            console2.log(message);}
+```
+
+**Recommended Mitigation:** Start the nextId from 1 instead of 0
+
 # Low
 
 ### [L-1] `Soulmate::SoulmateAreReunited` event is emitting out incorrect values:
