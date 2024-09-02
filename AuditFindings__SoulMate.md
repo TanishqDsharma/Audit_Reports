@@ -2,23 +2,88 @@
 
 ### [H-1] Incorrect Calcluation of timestamp in `Staking::lastClaim` mapping. The`Staking::claimRewards` calculates `lastClaim` of a user based on their soulmate nft creation timestamp instead of staking timestamp leading to incorrect staking rewards payout.
 
-**Description:** When a user claims rewards for the first time, the `lastClaim` timestamp is incorrectly set to the creation timestamp of the user's soulmate NFT
+**Description:** The `staking::claimRewards` function rewards the users with token who deposit into the contract for a specific period of time. The token is rewarded on the below logic (number_of_weeks*number_of_tokens__deposited), so if you deposited 1 token for 2 weeks you will get 14 tokens as a reward. However, the contract does not follows the intended behaviour in some cases and the issue lies int `lastClaim` variable.
 
 ```solidity
        if (lastClaim[msg.sender] == 0) {
   @>          lastClaim[msg.sender] = soulmateContract.idToCreationTimestamp(
                 soulmateId );
 ```
+The function first checks if `lastClaim[msg.sender]` is equal to zero. If the user is claiming the reward first time then it will call ` soulmateContract::idToCreationTimestamp` function and set `lastClaim[msg.sender]` to the timestamp their soulmate NFT was created. For a user who has no soulmate, this will set `lastClaim[msg.sender]` to the time the first soulmate NFT was created. Finally, For a user who is still awaiting a soulmate, it will set `lastClaim[msg.sender]` to 0 as the timestamp of the next soulmate NFT ID doesn't exist yet.
 
-So, when the user tries to claim the rewards the first time this `lastClaim` is set to the timestamp when the soulmate NFT was minted, not when the user staked the tokens. This results in incorrect calculation of the reward amount.
+**Impact:** 
+* A soulmate is rewarded tokens based on when their soulmate NFT was created regardless of the time they deposited.
+* A user who has never minted a soulmate will be rewarded tokens based on when the first soulmate NFT was created regardless of the time they deposited.
+* A user awaiting a soulmate but has deposited tokens can be rewarded tokens based on current `block.timestamp` divided by 604800 (`1 weeks`) regardless of the time they deposited.
 
-**Impact:** Since, the rewards are being calculated incorrectly users will receive extra payout.
 
 **Proof Of Concept:**
 
 ```solidity
+
+function test_IncorrectRewardCalculation()public{
+
+        address newstaker = makeAddr("STAKER");
+        vm.prank(soulmate1);
+        soulmateContract.mintSoulmateToken();
+        vm.prank(soulmate2);
+        soulmateContract.mintSoulmateToken();
+
+        vm.prank(soulmate1);
+        vm.warp(2 weeks);
+
+        airdropContract.claim();
+        
+
+        vm.prank(soulmate1);
+        loveToken.transfer(newstaker, 2);
+        vm.startPrank(newstaker);
+        soulmateContract.mintSoulmateToken();
+        loveToken.approve(address(stakingContract), 2);
+        stakingContract.deposit(2);
+        vm.warp(block.timestamp+1 weeks+1); // Total approx 3 weeks and some seconds
+        stakingContract.claimRewards(); // User whos awaiting a soulmate initiated the claimRewards() function
+        vm.stopPrank();
+        assert(loveToken.balanceOf(newstaker)==6);
+        }
 ```
 
+**Recommended Mitigation:**
+Modify the `claimRewards` function to use the deposit timestamp as the starting point for calculating rewards. Implement a mechanism to track the first deposit timestamp for each user and ensure that the lastClaim mapping is updated accordingly. Consider adding checks to prevent users from claiming rewards before making a deposit.
+
+### [H-2] Lack of validations allows users without a Soulmate NFT to claim lovetokens and also divorced users can claim tokens 
+
+**Decription:** According to the documentation only users having soulmate NFT can claim the loveTokens but since it lacks validations anyone can claim loveTokens without having the NFT. Additionally, `Soulmate::isDivorced` function, where the airdrop contract address is used
+instead of the user's address. A divorced user can still claim a Soulbound NFT.
+
+First, the `Airdrop::isDivorced` check send a contract address instead of users address to the function and it will always returns false and the check will fail
+
+```solidity
+ if (soulmateContract.isDivorced()) revert Airdrop__CoupleIsDivorced();
+
+```
+
+```solidity
+function isDivorced() public view returns (bool) {
+        return divorced[msg.sender];
+    }
+```
+
+**Impact:**
+**Proof Of Concept:**
+**Recommended Mitigation**
+
+### [H-3]
+
+**Decription:**
+**Impact:**
+**Proof Of Concept:**
+**Recommended Mitigation**
+
+### [H-4]
+**Decription:**
+**Impact:**
+**Proof Of Concept:**
 **Recommended Mitigation**
 
 
