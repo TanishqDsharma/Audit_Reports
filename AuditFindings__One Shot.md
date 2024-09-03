@@ -1,12 +1,12 @@
 # High
 
-### [H-1]
+### [H-1] 
 **Description:**
 **Impact:**
 **Proof Of Concept:**
 **Recommended Mitigation:**
 
-### [H-2]
+### [H-2]  Weak Randomness in `RapBattle::Battle` function
 **Description:**
 **Impact:**
 **Proof Of Concept:**
