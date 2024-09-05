@@ -1,10 +1,103 @@
 # High
 
-### [H-1] `RapBattle::_battle()` 
-**Description:**
-**Impact:**
+### [H-1] The `RapBattle::goOnStageOrBattle` function allows challenger to not lose any token if they lose
+
+**Description:** The `transferFrom` will only work if the CredToken contract first approve the amount of token that need to be transfered. Now, if the approve is missing and defender wins, this results in function reverting.
+
+```solidity
+// If random <= defenderRapperSkill -> defenderRapperSkill wins, otherwise they lose
+        if (random <= defenderRapperSkill) {
+            // We give them the money the defender deposited, and the challenger's bet
+            credToken.transfer(_defender, defenderBet);
+@>           credToken.transferFrom(msg.sender, _defender, _credBet);
+        } else {
+            // Otherwise, since the challenger never sent us the money, we just give the money in the contract
+            credToken.transfer(msg.sender, _credBet);
+        }
+```
+
+**Impact:** Challenger will note loose any funds if he/she loses, and defender insipite of winning wont be getting anything.
+
 **Proof Of Concept:**
+
+```solidity
+    function testRapperNotApprovingBeforeBattle() public twoSkilledRappers {
+        vm.startPrank(user);
+        oneShot.approve(address(rapBattle), 0);
+        cred.approve(address(rapBattle), 10);
+        rapBattle.goOnStageOrBattle(0, 3);
+        vm.stopPrank();
+
+        vm.startPrank(challenger);
+        oneShot.approve(address(rapBattle), 1);
+
+        vm.warp(1 days);
+        vm.expectRevert();
+        rapBattle.goOnStageOrBattle(1, 3);
+        vm.stopPrank();
+    }
+```
+
 **Recommended Mitigation:**
+
+Call `CredToken::transferFrom()` before calling `CredToken::_battle_()`:
+
+
+```diff
+    function goOnStageOrBattle(uint256 _tokenId, uint256 _credBet) external {
+        if (defender == address(0)) {
+            defender = msg.sender;
+            defenderBet = _credBet;
+            defenderTokenId = _tokenId;
+
+            emit OnStage(msg.sender, _tokenId, _credBet);
+
+            oneShotNft.transferFrom(msg.sender, address(this), _tokenId);
+            credToken.transferFrom(msg.sender, address(this), _credBet);
+        } else {
+-           // credToken.transferFrom(msg.sender, address(this), _credBet);
++           credToken.transferFrom(msg.sender, address(this), _credBet);
+            _battle(_tokenId, _credBet);
+        }
+    }
+```
+
+Then update `CredToken::_battle_()` to transfer the `totalPrize` of tokens since both the defender and challenger will have already transferred their tokens:
+
+```diff
+    function _battle(uint256 _tokenId, uint256 _credBet) internal {
+        address _defender = defender;
+        require(defenderBet == _credBet, "RapBattle: Bet amounts do not match");
+        uint256 defenderRapperSkill = getRapperSkill(defenderTokenId);
+        uint256 challengerRapperSkill = getRapperSkill(_tokenId);
+        uint256 totalBattleSkill = defenderRapperSkill + challengerRapperSkill;
+        uint256 totalPrize = defenderBet + _credBet;
+
+        uint256 random =
+            uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, msg.sender))) % totalBattleSkill;
+
+        // Reset the defender
+        defender = address(0);
+        emit Battle(msg.sender, _tokenId, random < defenderRapperSkill ? _defender : msg.sender);
+
+        // If random <= defenderRapperSkill -> defenderRapperSkill wins, otherwise they lose
+        if (random <= defenderRapperSkill) {
+            // We give them the money the defender deposited, and the challenger's bet
+-           credToken.transfer(_defender, defenderBet);
+-           credToken.transferFrom(msg.sender, _defender, _credBet);
++           credToken.transfer(_defender, totalPrize);
+        } else {
+-           // Otherwise, since the challenger never sent us the money, we just give the money in the contract
+-           credToken.transfer(msg.sender, _credBet);
++           // Otherwise, send the prize to the challenger
++           credToken.transfer(msg.sender, totalPrize);
+        }
+        totalPrize = 0;
+        // Return the defender's NFT
+        oneShotNft.transferFrom(address(this), _defender, defenderTokenId);
+    }
+```
+
 
 ### [H-2] `RapBattle::goOnStageOrBattle()` doesn't checks for ownership of the Rapper NFT for the challenger which results in allowing the challengers to go on stage with othe Rappers NFT
 
@@ -260,13 +353,7 @@ Tokens should be minted by taking the 18 decimals into consideration then only i
 
 # Low
 
-### [L-1]  `RapBattle::_battle()` can emit wrong events
-**Description:**
-**Impact:**
-**Proof Of Concept:**
-**Recommended Mitigation:**
-
-### [L-2] `battlesWon` property is never updated 
+### [L-1] `battlesWon` property is never updated 
 
 **Description:** `RapBattle` contract allows the rappers to get on stage and battle, and then the winner is selected but the `battlesWon` property is never updated. 
 
@@ -275,7 +362,7 @@ Tokens should be minted by taking the 18 decimals into consideration then only i
 **Recommended Mitigation:**
 Add logic to update the `battlesWon` property 
 
-### [L-3] `RapBattle::_battle` function doesn't implements the check to select the winner correctly
+### [L-2] `RapBattle::_battle` function doesn't implements the check to select the winner correctly
 
 **Description:** The `RapBattle::_battle` function selects the defender as the winner when random number is equal to defender rapper skill. This should lead to a tie between the defender and challenger but the way this is implemented selects the defender as the winner.
 
@@ -322,7 +409,7 @@ When the _battle function is called and the random numenr is equal to defender r
 
 Add the check to handle the situation when random number is equal to defender rapper skill.
 
-### [L-4] Rappers can battle with themselves which results in avoiding a strong Opponent
+### [L-3] Rappers can battle with themselves which results in avoiding a strong Opponent
 
 **Description:** The `RapBattle::goOnStageOrBattle` function does not include checks to prevent rappers from battling themselves, which allows them to bypass facing a valid, potentially stronger opponent.
 
@@ -361,9 +448,4 @@ function goOnStageOrBattle(uint256 _tokenId, uint256 _credBet) external {
 }
 ```
 
-# Informational 
 
-**Description:**
-**Impact:**
-**Proof Of Concept:**
-**Recommended Mitigation:**
