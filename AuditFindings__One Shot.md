@@ -122,8 +122,26 @@ Consider using an oracle for your randomness like [Chainlink VRF](https://docs.c
 
 # Medium
 
-### [M-1]
-**Description:**
+### [M-1] `OneShot::mintRapper()` is vulnerable to re-entrancy resulting in user minting NFT with high Rappers skills instead of starting from the default skills
+
+**Description:** The `OneShot::mintRapper()` function presents a reentrancy vulnerability, `safeMint()` is executed prior to updating the `RapperStats`, violating the CEI.
+
+```solidity
+function mintRapper() public {
+        uint256 tokenId = _nextTokenId++;
+@>        _safeMint(msg.sender, tokenId);
+
+        // Initialize metadata for the minted token
+@>        rapperStats[tokenId] = RapperStats({weakKnees: true, heavyArms: true, spaghettiSweater: true, calmAndReady: false, battlesWon: 0});
+    }
+```
+
+This flaw allows attackers to exploit the system by creating a contract specifically for minting new rappers. So, attackers can take advantage to mint high skill rapper NFTs.
+
+**Impact:** Users can mint rapper NFTs that are having higher skills than default.
+
+
+
 **Impact:**
 **Proof Of Concept:**
 **Recommended Mitigation:**
