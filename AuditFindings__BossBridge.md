@@ -123,3 +123,26 @@ To guarantee that create/create2 functions operate correctly, the compiler must 
 
 
 
+### [H-4] Minted Tokens locked forever
+
+**Description:** The `TokenFactory::deployToken` function calls `L1Token` contract for deploying purpose. The problem arises when the `L1Token` mints `INITIAL_SUPPLY` to `msg.sender` which is `TokenFactory` contract in this case. After deployment, there is no way to either transfer out these tokens or mint new ones, as the holder of the tokens, `TokenFactory`, has no functions for this, also not an upgradeable contract, so all token supply is locked forever.
+
+
+**Impact:**
+Using `TokenFactory` for deploying token contracts will result in unusable tokens as those tokens will stay locked forever.
+
+**Recommended Mitigations:**
+
+Modify the below code by adding a receiver address so that it have the intial minted tokens.
+
+```diff
+contract L1Token is ERC20 {
+    uint256 private constant INITIAL_SUPPLY = 1_000_000;
+
+-    constructor() ERC20("BossBridgeToken", "BBT") {
++    constructor(address receiver) ERC20("BossBridgeToken", "BBT") {
+-         _mint(msg.sender, INITIAL_SUPPLY * 10 ** decimals());
++         _mint(receiver, INITIAL_SUPPLY * 10 ** decimals());
+    }
+}
+```
