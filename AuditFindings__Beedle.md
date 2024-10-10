@@ -119,6 +119,122 @@ Users will be able to run the functions successfully and no there would be unnec
 Consider checking if `_amount` is zero or not in the beginning of the function.
 
 
+### [L-6] Using `block.timestamp` for setting timestamps
+ 
+**Description:** Using `block.timestamp` for recording the timestamp in borrow function can introduce a vulnerablity. Malicious miners could potentially manipulate the `block.timestamp`, leading to inaccuracies in the recorded borrowing timestamps. This can have implications for time-sensitive operations such as interest calculations, time-based auctions, and loan durations.
+
+```solidity
+ Loan memory loan = Loan({
+                lender: pool.lender,
+                borrower: msg.sender,
+                loanToken: pool.loanToken,
+                collateralToken: pool.collateralToken,
+                debt: debt,
+                collateral: collateral,
+                interestRate: pool.interestRate,
+ @>               startTimestamp: block.timestamp,
+                auctionStartTimestamp: type(uint256).max,
+                auctionLength: pool.auctionLength
+            });
+```
+
+**Impact:** Manipulation with block.timestamp can result in wrong interest calculation, can affect time based auctions etc
+
+**Recommended Mitigations:**
+Consider using `block.number` or other block-related variables, which are less susceptible to manipulation by miners, for any time-dependent functionalities or decision-making processes. 
 
 
+### [L-7] `Staking` contract missing TKN!=Weth check
 
+**Description:** The staking contract doesn't implement any checks to verify that the `TKN` and `WETH` contract addresses should not be the same.
+
+**Impact:** Using the same address may introduce vulnerabilities, where a user could exploit the contract by tricking it into counting the same tokens multiple times or causing unintended behaviors in the logic. It also creates confusion
+
+**Recommended Mitigations:**
+
+Implement the below check inside the constructor:
+
+```diff
+constructor(address _token, address _weth) Ownable(msg.sender) {
++++   require(_token != _weth, "TKN and WETH must be different addresses");
+    TKN = IERC20(_token);
+    WETH = IERC20(_weth);
+}
+
+```
+
+### [L-8] Staking Rewards Dilution
+
+**Description:** In a staking contract, users are typically rewarded for depositing and holding tokens within the contract. However, if users can transfer tokens directly to the staking contract without using the designated deposit function, it can lead to unintended consequences. This vulnerability allows individuals to dilute the staking rewards pool without contributing to it properly, thereby negatively impacting legitimate stakers.
+
+Example: Users can bypass the staking logic by directly sending staking tokens to the staking contract using the standard ERC20 transfer function, such as 
+
+```solidity
+token.transfer(address(staking), amount)
+```
+When this happens, the staking contract does not have a mechanism to recognize that these tokens have been deposited for staking purposes since the deposit function—which typically handles the updating of user balances, reward calculations, and other necessary bookkeeping—was not called.
+
+**Impact:** When rewards are distributed, they are now shared among a larger number of tokens (150), reducing the rewards per token for the original stakers.
+
+**Recommended Mitigations:**
+
+Use Global Variable that keeps track of tokens that are deposit legitimately into the contract. This variable should be updated in both the deposit and withdraw functions to ensure accurate tracking of the actual staked balance. 
+
+
+### [L-9] `Lender::refinance` emits incorrect parameters
+
+**Description:** The `repaid` event  in the refinance function emits wrong parameters
+
+```solidity
+ emit Repaid(
+                msg.sender,
+                loan.lender,
+                loanId,
+@>                debt,
+@>                collateral,
+                loan.interestRate,
+                loan.startTimestamp
+            );
+```
+
+**Impact:** Events with wrong parameter can be misinterpreted by the frontend.
+
+**Recommended Mitigations:**
+
+```diff
+ emit Repaid(
+                msg.sender,
+                loan.lender,
+                loanId,
+--              debt,
+--              collateral,
+++              loan.debt,
+++              loan.collateral,
+                loan.interestRate,
+                loan.startTimestamp
+            );
+```
+
+### [L-10] Rounding error risk in `Lender::borrow` function
+
+**Description:** The formula that is used for calculating fees in borrow function is vulnerable to rounding errors. 
+
+```solidity
+uint256 fees = (debt * 50) / 10000;
+```
+
+**Impact:** If debt values are low enough, you could end up with a situation where fees are effectively zero, which may not be the intended outcome.
+
+**Proof of Concept:**
+
+Scenario 1:
+* Let’s say debt is 19999. Then:
+  * (19999 * 50) = 999950
+  * 999950 / 10000 = 99.995 → rounded down to 99.
+
+Scenario 2:
+* If debt is 199:
+  * (199 * 50) = 9950
+  * 9950 / 10000 = 0.995 → rounded down to 0.
+
+**Recommended Mitigation:** Import & use fixed-point arithmetic math libraries
