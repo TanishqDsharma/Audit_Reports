@@ -238,3 +238,12 @@ Scenario 2:
   * 9950 / 10000 = 0.995 → rounded down to 0.
 
 **Recommended Mitigation:** Import & use fixed-point arithmetic math libraries
+
+### [L-11] Users can be prevented by Operator from borrowing from a pool
+
+**Description:** When a user tries to borrow from a pool, another malicious user can frontrun the user by borrowing a large amount of tokens from the pool leaving it almost out of liquidity. Now,  when the user transaction goes for taking the loan it gets reverted as the malicious user already taken the loan almost leaving no funds resulting transaction being reverted.
+
+**Impact:** This can be treated as DOS since customers are not able to take any loan and it also a problem for lenders as they wont be able to earn any interest on the loan as the malicious user immediately repays it.
+
+**Recommended Mitigations:**
+Include a minimum interest fee if the loan duration is less than a certain time to discourage this behavior.
