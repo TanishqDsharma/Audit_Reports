@@ -247,3 +247,52 @@ Scenario 2:
 
 **Recommended Mitigations:**
 Include a minimum interest fee if the loan duration is less than a certain time to discourage this behavior.
+
+### [L-12] Weird ERC20's that can pause the protocol
+
+**Description:** If tokens used for collateral or Loan are ERC20's that are having pausible feature such as USDT. Now, if for any reason these gets paused, the protocol will not work as expected as users might be using ERC20's that are pausable for collateral and Loan purposes.
+
+**Impact:**  If the token is paused then transfers of tokens into and out of the protocol are not possible, which impacts ability to deposit, ability to pay back, ability to move loans and all other such related functionality depending on transfer, transferFrom etc functions.
+
+**Proof Of Concept:** 
+
+Some of the few Instances where token pausing can affect the protocol there are more:
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L152>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L159>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L187>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L203>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L267>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L269>
+
+**Recommended Mitigations:** It may be ideal to whitelist allowed tokens for loanToken and collateralTokens and not allow callback, hook, tokens such as ERC777, ERC1363 etc
+
+### [L-13] Malicious Users can DOS lenders by not allowing them to withdraw
+
+**Description:** A malicious user can frontrun the `Lender` when lender is trying to withdraw funds by taking all the liquidity as loan. Then later the user can repay the loan. Since, the duration of the loan is small the intrest will be ngeligible and the pool lender cannot withdraw there funds.
+
+**Impact:** Malicious user can make Lenders not able to withdraw there funds, hence causing a dos for the withdrawal service.
+
+**Recommended Mitigation**: Add a minimum interest fee, despite the length of the borrow, in order to make this attack costly and prevent it
+
+### [L-14]  Users can prevent Pool Owners to change `minLoanSize` and `auctionLength`
+
+**Description:** A malicious user can prevent the pool Owner or we can say the lender to change `minLoanSize` and `auctionLength`. Owners of the pools need to use the `Lender::setPool` function to change the `minLoanSize` and `auctionLength`.
+
+The problem occurs during the below check:
+
+```solidity
+        if (p.outstandingLoans != pools[poolId].outstandingLoans)
+            revert PoolConfig();
+```
+
+While this makes sure the accounting is correct, it opens up an attack vector. Since this is the only way to change the values of `minLoanSize` and `auctionLength`, a malicious user may be monitoring the mempool for such transactions and front-run them and borrow/ repay in order to change the value of `outstandingLoans`. As by changing it the transaction will revert
+
+**Impact:** Lenders or Pool Owner cannot change the values of `minLoanSize` and `auctionLength`
+
+**Recommended Mitigations:** Making separate functions that allows pool Owners to update the values of `minLoanSize` and `auctionLength`
