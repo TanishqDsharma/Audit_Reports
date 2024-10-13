@@ -385,4 +385,64 @@ Restructure the refinance function
 
 **Recommended Mitigations:** Assign the address of fees contract to `feeReceiver` instead of passing the `msg.sender`value.
 
-### [L-20]
+### [L-20] `Lender::buyLoan` reverts if the timelasped is very less from the start of the auction
+
+**Description:** The issue in the `buyLoan` function stems from the calculation of `currentAuctionRate` during the refinance auction. The logic effectively prevents anyone from purchasing the loan at the start of the auction due to how the `currentAuctionRate` is derived.
+
+```solidity
+uint256 currentAuctionRate = (MAX_INTEREST_RATE * timeElapsed) / loan.auctionLength;
+```
+
+If timeElapsed is very small, such as at the beginning of the auction, the result of this calculation will be too low. 
+
+**Impact:**
+This leads to the `buyLoan` function being blocked at the beginning of an auction.
+
+**Proof Of Concept:**
+
+Add the below test to the testsuite:
+
+```solidity
+
+function testCantBuyLoanAtStartOfTheAuction() public{
+        test_borrow();
+
+        vm.startPrank(lender2);
+        Pool memory p1 = Pool({
+            lender: lender2,
+            loanToken: address(loanToken),
+            collateralToken: address(collateralToken),
+            minLoanSize: 100*10**18,
+            poolBalance: 1000*10**18,
+            maxLoanRatio: 2*10**18,
+            auctionLength: 1 days,
+            interestRate: 1000,
+            outstandingLoans: 0
+        });
+        bytes32 poolId2 = lender.setPool(p1);
+
+        vm.stopPrank();
+        
+
+        vm.startPrank(lender1);
+
+        uint256[] memory loanIds = new uint256[](1);
+        loanIds[0] = 0;
+        
+        lender.startAuction(loanIds);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp+1);
+
+        vm.startPrank(borrower);
+        lender.buyLoan(0, poolId2);
+        vm.stopPrank();
+    }
+```
+The above test will fail giving out the error `[FAIL. Reason: RateTooHigh()]`. 
+
+**Recommended Mitigations:**
+
+Instead of doing this calculations just check if the `pools[poolId].interestRate > MAX_INTEREST_RATE`.
+
+
