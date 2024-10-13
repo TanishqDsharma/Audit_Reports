@@ -339,6 +339,50 @@ if (block.timestamp <= loan.auctionStartTimestamp + loan.auctionLength) revert A
 * Instead of allowing all tokens to be loan and collateral tokens whitelist some tokens and use those only for loans and collateral
 
 
-### [L-17] 
+### [L-17] L2 Sequencer dependent functions
+
+**Description:** There are some function that are using some parameters such as `block.timestamp` which depends on the L2 sequencer and can cause protocol not working as expected. If L2 sequencer goes down (e.g., during upgrades, bugs, or maintenance), the protocol will be unable to properly calculate interest and other time-dependent operations like auctions.  This makes the system vulnerable during such downtimes, potentially causing errors in functions like `borrow`, `refinance`, and `buyLoan`.
+
+**Impact:** It can make the protocol function in unexpected way such some functions might not work as expected when the sequencer goes down.
+
+**Proof Of Concept:** L2 sequencer downtimes are not hypothetical; they have occurred in practice. Here are some real-world incidents:
+
+1. Optimism Bedrock Upgrade: During this upgrade, the sequencer could not process transactions for several hours, causing downtime for all transactions dependent on block.timestamp on the network.
+
+Impact: Users on Optimism could not interact with dApps, including those involving lending or auctions, because the sequencer was unavailable.
+
+2. Arbitrum Sequencer Bug: A bug in the Arbitrum sequencer caused a temporary pause in transaction processing, which meant that no new blocks were generated, and smart contracts relying on block.timestamp were stuck.
+
+Impact: dApps on Arbitrum were effectively frozen, with critical operations such as interest accrual, auctions, and liquidations being affected.
+
+**Recommended Mitigations:**
+1. Chainlink provides a Sequencer Uptime Feed that can be integrated into smart contracts to check if the L2 sequencer is currently up or down. This feed reports the status of sequencers on popular L2s like Arbitrum and Optimism.
+2. Implementation of Extra Time Buffer
+
+### [L-18] `Lender::refinance` function dos user for refinancing in the same pool
+
+**Description:** When a user wants to refinance in the same pool they might not able to do so becuase of the below conditional check:
+
+```solidity
+            if (pool.poolBalance < debt) revert LoanTooLarge();
+```
+The above check checks the current poolBalance against the users debt which might be greater than than poolBalance mostly.
+
+For example: Intially balance of the pool was 1000 USDC, one borrower came and took loan of 900 USDC now the Lender updated the loan terms and offering loan at lowers interest in this case the user might want to refinnace the loan but they cant do it as refinancing the loan in the same pool for 1000 USDC will revert the transaction as the current poolBalance is 100 USDC which is less than debt which will make the above check true and revert the transaction.
+
+**Impact:** Users will not be able to refinnace the loans from the same pool.
+
+**Recommended Mitigations:**
+
+Restructure the refinance function
+
+### [L-19] Fees generated can be sent to any address
+
+**Description:** The `feeReceiver` is having value of `msg.sender` assigned to it inside the constructor instead of the `fees` contract. By not initializing the `feeReceiver` variable, the fees can be sent to the contract owner and not to the Fees.sol contract that allows the exchange of tokens and take it to the staking contract.
+
+**Impact:** Wont be able to user `Fees.sol` and `Staking.sol` contracts, preventing the correct functioning of the `Lender` contract
 
 
+**Recommended Mitigations:** Assign the address of fees contract to `feeReceiver` instead of passing the `msg.sender`value.
+
+### [L-20]
