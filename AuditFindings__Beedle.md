@@ -296,3 +296,49 @@ While this makes sure the accounting is correct, it opens up an attack vector. S
 **Impact:** Lenders or Pool Owner cannot change the values of `minLoanSize` and `auctionLength`
 
 **Recommended Mitigations:** Making separate functions that allows pool Owners to update the values of `minLoanSize` and `auctionLength`
+
+### [L-15] `Lender::seizeLoan` function allows to seize the loan early
+
+**Description:** Lenders cans seize the loan early before the auction time period ends. The problem lies in the below check:
+
+```solidity
+if (block.timestamp < loan.auctionStartTimestamp + loan.auctionLength) revert AuctionNotEnded();
+``` 
+This statement allows to end auction when the block.timestamp is equal to auctions end time but not greater than the auctions endtime. But we can see 'Lender::buyLoan' only considers end of the auction if blocktimestamp is greater than `loan.auctionStartTimestamp + loan.auctionLength` or we can auctions endtime.
+
+**Impact:** Lenders can end the auction before it actually ends
+
+**Recommended Mitigations:** 
+
+Correct the check to:
+
+```solidity
+if (block.timestamp <= loan.auctionStartTimestamp + loan.auctionLength) revert AuctionNotEnded();
+``` 
+
+### [L-16] Event Based Rentrancy due to Callback Tokens:
+
+**Description:** Callback functions that can reenter functions with events lead to Event Rentrancy. If a loan Token or collateral Token are callback tokens, when transferred out they may be sent to a contract that can callback into the same function before the first event is emitted. This can result in into missing data or incorrect events being emitted.
+ 
+**Impact:**  This results in incorrect events and missed event emission information for offchain tooling, monitoring, analysis, front ends. Users may act on protocol on faulty information from these events
+
+**Proof Of Code:**
+
+1. After external call to transfer(), event borrowed is emitted 
+<https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L277>
+
+2. After external call to transfer collateral tokens to borrower lines 329, event repaid 
+<https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L333>
+
+3.After external call to transfer() to feeReceiver lines 403, event repaid is emitted
+<https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L405>
+
+**Recommended Mitigations:**
+
+* It is advised to follow Checks, Effects and Interaction (CEI) pattern
+* Instead of allowing all tokens to be loan and collateral tokens whitelist some tokens and use those only for loans and collateral
+
+
+### [L-17] 
+
+
