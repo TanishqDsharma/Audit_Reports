@@ -202,6 +202,81 @@ contract StakingTest is Test {
 
 **Recommended Mitigations:** Implement a mechanism where rewards are distributed based on both the amount staked and the duration of staking.
 
+### [M-8] Transactions for some ERC20s will revert if value transferred is zero
+
+**Description:** Some tokens such as LEND will revert if the value transferred is zero. So, in `repay` function `_calculateInterest` functions returns lenderInterest and protocolInterest. Later `protocolInterest` is used transfer the protocol fee to the fee receiver but the the transaction will revert if the `protocolInterest` is zero.
+
+```solidity
+ // transfer the protocol fee to the fee receiver
+            IERC20(loan.loanToken).transferFrom(
+                msg.sender,
+                feeReceiver,
+                protocolInterest
+            );
+```
+
+**Impact:** If the value of fees that is being transferred is zero then transaction will revert as the transfer value will be zero and some tokens like LEND does not support this.
+
+**Recommended Mitigations:** Upon sending fees, make sure it is a non-zero value.
+
+### [M-9] If a token has low decimals then rounding errors will generate 
+
+**Description:** While taking the loan if the user passes a token as collateral which has less decimals then the loan can be borrowed without paying any interest
+
+```solidity
+    function _calculateInterest(
+        Loan memory l
+    ) internal view returns (uint256 interest, uint256 fees) {
+        uint256 timeElapsed = block.timestamp - l.startTimestamp;
+@>      interest = (l.interestRate * l.debt * timeElapsed) / 10000 / 365 days;
+@>      fees = (lenderFee * interest) / 10000;
+        interest -= fees;
+    }
+```
+
+**Impact:** Borrowers will not be paying any interest or interest will be very negligible which not expected by the protocol
+
+**Proof Of Concept:**
+
+For example: Lets take GUSD which has 2 decimals
+* `l.debt`: 100 GUSD
+* `l.interestRate`: 100 (1%) per year
+* `timeElapsed`: 86400 seconds (1 day)
+* `lenderFee`: 100 (1%)
+
+```solidity
+interest = (l.interestRate * l.debt * timeElapsed) / 10000 / 365 days
+         = (100 * (100 * 1e2) * 86400) / 10000 / 31536000
+         = 8640 / 31536
+         = 0 (rounding down; since Solidity has no fixed-point numbers)
+
+fees = (lenderFee * interest) / 10000
+     = (100 * 0) / 10000
+     = 0
+```
+
+**Recommended Mitigations:**
+Check the tokens that users are passing as collateral have enough decimals to avoid rounding errors. ADD `MIN_LOAN_TOKEN_DECIMALS` constant with an appropriate value.
+
+### [M-10] Malicious User FrontRuns the User by creatingPool for WETH-Profits token pair with highly manipulated price
+
+**Description:**  The issue arises from the way `sellProfits` function interacts with uniswapV3 pools to swap tokens.The function attempts to swap a specifies _profits token into WETH using `uniswapV3::exactInputSingle` function which requires an existing liquidity pool between the two tokens. If no such pool exists, the transaction will revert. 
+
+However, this behaviour opens the door for a frontrunning attack where a malicious user can create a pool with manipulated liquidity ratios, enabling them to steal funds through unfavorable swaps.
+
+**Impact** When swapping the _profits token for WETH most of the tokens will be lost due to highly manipulated prices.
+
+**Proof Of Concept:**
+
+This is a theoretical POC:
+
+1. A liquidation event occurs, and the contract intends to swap _profits tokens for WETH.
+2. The bad actor monitors pending transactions and sees the `sellProfits` function call about to execute.
+3. Before the function executes, the bad actor frontruns the transaction by creating a Uniswap V3 pool with a highly manipulated price for the _profits token and WETH.
+Step
+4. The `sellProfits` function then proceeds to execute and swaps _profits for WETH, but due to the skewed liquidity ratio, the contract receives an unfavorable amount of WETH.
+
+**Recommended Mitigations:** Consider using 1swapExactInputMultihop1 to first swap the less liquid token (such as the _profits token) into a more liquid intermediary token like USDC, and then swap USDC into WETH. This approach is preferable for the contract, as it handles a variety of tokens with different levels of liquidity. By routing the swap through a highly liquid token like USDC, you reduce the risk of price manipulation or unfavorable exchange rates that may occur with direct swaps involving less popular tokens. This ensures a more stable and reliable swap outcome.
 
 # Low
 
