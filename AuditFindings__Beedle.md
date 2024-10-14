@@ -111,8 +111,96 @@ Using fixed fee level when swap tokens  may lead to some fee tokens being locked
 
 ### [M-6] Pragma Non-Specification can lead to non-functional contracts when deployed to L2's
 
-**Description:** In all the contracts pragma is `^0.8.19` which means it will use the compiler either `0.8.19` or `greater than this version` 
+**Description:** In all the contracts pragma is `^0.8.19` which means it will use the compiler either `0.8.19` or `greater than this version`. By default the compiler will be using the latest version and some L2's wont be supporting this and it will produce broken code for some L2's
 
+**Impact:** Wont be able to compile code on L2's that are not supporting 0.8.19 or higher solidity compiler
+
+**Recommended Mitigations:**
+
+Use earlier version of the compiler. While the project itself may or may not compile with 0.8.20, other projects with which it integrates, or which extend this project may, and those projects will have problems deploying these contracts/libraries.
+
+### [M-7] Frontrunning the `Staking` can get full reward no need to deposit for a particular period of time
+
+**Description:** The `Staking` contract is vulnerable to frontrunning that allows users to unfairly claim rewards by timing their deposits just before reward distribution, without having to stake for a long period. This issue arises because the contract does not account for staking duration when calculating and distributing rewards, leading to an imbalance where short-term stakers can claim the same rewards as long-term stakers.
+
+For example:
+
+1. A user (USERA) can observe that another user (USERB) has been staking for an extended period, accruing rewards.
+2. Just before the rewards are distributed, USERA can stake tokens (which could even be for a single block or very few blocks).
+3. Because the reward calculation only considers the current stake amount at the distribution time, USERA's newly staked tokens are counted equally to USERB’s long-staked tokens.
+As a result, Alice is able to claim the same rewards as Bob, even though Bob staked for a much longer period (e.g., 100 blocks) while Alice staked for a minimal period.
+
+
+**Impact:** Stakers dont need to stake tokens for longer periods to get rewards they can just stake before the reward distribution and can get the same rewards that any user gets on staking fro longer periods.
+
+**Proof Of Concept:**
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import "forge-std/Test.sol";
+import "solady/src/tokens/ERC20.sol";
+import "../src/Staking.sol";
+
+contract SERC20 is ERC20 {
+    function name() public pure override returns (string memory) {
+        return "Test ERC20";
+    }
+
+    function symbol() public pure override returns (string memory) {
+        return "TERC20";
+    }
+
+    function mint(address _to, uint256 _amount) public {
+        _mint(_to, _amount);
+    }
+}
+
+contract StakingTest is Test {
+    SERC20 st;
+    SERC20 weth;
+    Staking staking;
+
+    function setUp() public {
+        st = new SERC20();
+        weth = new SERC20();
+        staking  = new Staking(address(st), address(weth));
+    }
+    
+    function testDeposit() public {
+        address alice = makeAddr("Alice");
+        address bob = makeAddr("Bob");
+
+        deal(address(st), address(alice), 2 ether);
+        deal(address(st), address(bob), 2 ether);
+
+        vm.startPrank(bob);
+        st.approve(address(staking), 2 ether);
+        staking.deposit(2 ether);
+        vm.stopPrank();
+
+        vm.roll(100);
+
+        vm.startPrank(alice);
+        st.approve(address(staking), 2 ether);
+        staking.deposit(2 ether);
+        vm.stopPrank();
+
+        deal(address(weth), address(staking), weth.balanceOf(address(staking)) + 1 ether);
+
+        vm.startPrank(alice);
+        staking.claim();
+        vm.stopPrank();
+        vm.startPrank(bob);
+        staking.claim();
+        vm.stopPrank();
+        assertEq(weth.balanceOf(alice), weth.balanceOf(bob));
+    }
+}
+```
+
+**Recommended Mitigations:** Implement a mechanism where rewards are distributed based on both the amount staked and the duration of staking.
 
 
 # Low
