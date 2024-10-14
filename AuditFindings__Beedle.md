@@ -80,8 +80,34 @@ However, due to precision loss, if the totalDebt is miscalculated as 400 tokens 
 
 **Recommended Mitigations:** Use a proper deadline in the future to prevent the transaction from being executed at any manipulated or unfavorable time.
 
+### [M-5] Fixed Fees is used for Swapping Tokens in `Fees::sellProfits` function
 
+**Description:** This issue is that fixed fee is being used in `Fees::sellProfits` function used to swap loan tokens for collateral tokens from liquidations.
 
+```solidity
+ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: _profits,
+                tokenOut: WETH,
+@>                fee: 3000,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
+
+```
+But not all pools in uniswap have `0.3` fee. 
+
+For example: 
+1. fee level of XMON / ETH (0x59b4bb1f5d943cf71a10df63f6b743ee4a4489ee) on Mainnet is 10000 (1%),
+2. fee level of WETH / BOB (0x1a54ae9f662b463f8d432482975c17e51518b50d) on Optimism is 500 (0.05%).
+
+**Impact:** 
+Using fixed fee level when swap tokens  may lead to some fee tokens being locked in contract.
+
+**Recommended Mitigations:** Instead of using a fixedfee pass fee level to the function.
 
 
 
