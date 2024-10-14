@@ -37,13 +37,53 @@ However, due to precision loss, if the totalDebt is miscalculated as 400 tokens 
 
 ### [M-2] `Lenders` can frontrun the users taking the loan and significantly increase the interest rate
 
-**Description:** Whenever a user tries to take loan, the lender can front-run the user and significantly increase the intrest rate lets say to the `MAX_INTEREST_RATE` and turn the loan into conditions which the user would see as unacceptable. Any user can take a loan by specifying the pool, the borrow amount they want and the collateral they are willing to provide but the user cant specify the interest hes willing to take loan on. So, a lender can monitor the mempool for transactions for taking loan and frontrun those transactions.
+**Description:** Whenever a user tries to take loan, the lender can front-run the user and significantly increase the intrest rate lets say to the `MAX_INTEREST_RATE` and turn the loan into conditions which the user would see as unacceptable. Any user can take a loan by specifying the pool, the borrow amount they want and the collateral they are willing to provide but the user cant specify the interest hes willing to take loan on. So, a lender can monitor the mempool for transactions for taking loan and frontrun those transactions. In the current implementation of the contract, there is no mechanism to transfer funds to another address if the borrower or lender gets blacklisted. This leads to a situation where the funds—either the collateral or loan—get permanently frozen in the contract, as no one can move them from the contract balance.
 
 **Impact:** Users will take laon at much higher interest rates.
 
-**Recommended Mitigations:**
+**Recommended Mitigations:** Add a param to the Borrow struct which is the max interest rate the user is willing to pay. Upon taking a borrow, make sure this value >= the interest rate of the pool.
 
-Add a param to the Borrow struct which is the max interest rate the user is willing to pay. Upon taking a borrow, make sure this value >= the interest rate of the pool.
+### [M-3] Funds will be remain stuck in the contract if Lenders/Borrowers are blacklisted by the ERC20's such as USDC
+
+**Description:**  The vulnerability arises from the inability of a borrower or lender to transfer their withdrawable funds (either the loan or collateral assets) to another address in case they get blacklisted by the respective token contracts (loan or collateral token contracts). If an address gets blacklisted, it is essentially blocked from interacting with the token contract, meaning any attempt to transfer funds to or from that address will fail.
+
+**Impact:** Funds remains stuck in the contract borrower/lender cannot withdraw the funds if they are blacklisted by tokens contracts such as USDC.
+
+**Proof Of Concept:**
+* repay(): This function allows the borrower to repay their debt and retrieve the collateral. If the borrower is blacklisted by the collateral asset contract, they cannot receive the collateral, causing it to remain locked in the contract.
+
+* seizeLoan(): In cases of loan default, this function allows the lender to seize the borrower’s collateral. But if the lender is blacklisted by the collateral asset contract, the lender cannot receive the seized collateral, again causing the collateral to be locked in the contract.
+
+* removeFromPool(): This function is supposed to transfer the loan tokens from the contract to the lender. However, if the lender is blacklisted by the loan token contract, the tokens cannot be transferred, and the loan funds remain stuck in the contract.
+
+**Recommended Mitigations:** Add the `recipient` parameter to the functions `repay()`, `seizeLoan()` and `removeFromPool()` functions. This will help to specify whom should receive the fund in case the token contracts  blacklists lender/borrower.
+
+### [M-4] No Proper deadline in `Fees::sellProfits` function
+
+**Description:** There’s a vulnerability in the sellProfits transaction because it uses the current time (block.timestamp) as a deadline. A real deadline would give a limited time window for executing the transaction. For example, you might set the deadline to a few minutes or hours in the future. This ensures the transaction can only occur within that timeframe, protecting it from being executed much later than intended.Since the current code uses `block.timestamp`, it effectively allows the transaction to be executed immediately at any time without offering a meaningful time limit.
+
+```solidity
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: _profits,
+                tokenOut: WETH,
+                fee: 3000,
+                recipient: address(this),
+@>                deadline: block.timestamp,// <== By using block.timestamp, you're saying: “The deadline is right now,” which means whenever the transaction is mined, it will pass.
+                amountIn: amount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
+```
+
+**Impact:** Without an expiration deadline, a malicious miner/validator can hold a transaction until they favor it or they can make a profit. As a result, the `Fees` contract can lose a lot of funds from slippage.
+
+**Recommended Mitigations:** Use a proper deadline in the future to prevent the transaction from being executed at any manipulated or unfavorable time.
+
+
+
+
+
 
 
 # Low
