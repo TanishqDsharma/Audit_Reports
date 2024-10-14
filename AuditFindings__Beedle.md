@@ -2,6 +2,50 @@
 
 # Medium
 
+### [M-1] `Lender::_calculateInterest` Function is vulnerable to precision loss which allows makes `Lender::giveloan` to offer loans at less collateral
+
+**Description:** The vulnerability stems from the multiple divisions happening within the _calculateInterest() function. Here's how the precision loss occurs:
+
+```solidity
+interest = (l.interestRate * l.debt * timeElapsed) / 10000 / 365 days;
+```
+In the `Lender::giveLoan` function, `_calculateInterest()` is called to calculate the lender's interest and protocol fees. These values are then added to the loan's debt to compute the total debt that the pool must cover. However, due to the precision loss in `_calculateInterest()`, `lenderInterest` and `protocolInterest` could be much smaller than intended or even zero. This leads to an underestimation of totalDebt. 
+
+```solidity
+// calculate the interest
+            (
+                uint256 lenderInterest,
+                uint256 protocolInterest
+            ) = _calculateInterest(loan);
+            uint256 totalDebt = loan.debt + lenderInterest + protocolInterest;
+```
+
+Incorrect calculation of totalDebt leads to incorrect calculation of loanRatio, allowing us to give loan to a pool that has a higher loan ratio than our current pool which is not the expected behavior of the protocol.
+
+```solidity
+            uint256 loanRatio = (totalDebt * 10 ** 18) / loan.collateral;
+```
+
+Example: 
+Imagine you have a loan with a collateral value of 1000 tokens and a total debt of 600 tokens. The loan ratio would be 600/1000 = 0.6 or 60%. If the new pool has a maxLoanRatio of 70%, the loan can be transferred because 60% is lower than 70%.
+
+However, due to precision loss, if the totalDebt is miscalculated as 400 tokens instead of 600, the loan ratio becomes 400/1000 = 0.4 or 40%. Now, even if the pool's actual maxLoanRatio is stricter, say 50%, the protocol might incorrectly allow the transfer because it thinks the loan ratio is 40%, even though it's actually riskier than it appears.
+
+**Impact:** Loans can be given to other pools at less collateral
+
+**Recommended Steps:** Therefore, verifying that neither the interest rate nor the fees are zero can help prevent precision loss and trigger a reversal if necessary
+
+### [M-2] `Lenders` can frontrun the users taking the loan and significantly increase the interest rate
+
+**Description:** Whenever a user tries to take loan, the lender can front-run the user and significantly increase the intrest rate lets say to the `MAX_INTEREST_RATE` and turn the loan into conditions which the user would see as unacceptable. Any user can take a loan by specifying the pool, the borrow amount they want and the collateral they are willing to provide but the user cant specify the interest hes willing to take loan on. So, a lender can monitor the mempool for transactions for taking loan and frontrun those transactions.
+
+**Impact:** Users will take laon at much higher interest rates.
+
+**Recommended Mitigations:**
+
+Add a param to the Borrow struct which is the max interest rate the user is willing to pay. Upon taking a borrow, make sure this value >= the interest rate of the pool.
+
+
 # Low
 
 ### [L-1] Missing Zero Address Check in `Lender::setFeeReceiver` function
