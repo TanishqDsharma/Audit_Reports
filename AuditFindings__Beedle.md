@@ -109,6 +109,9 @@ Using fixed fee level when swap tokens  may lead to some fee tokens being locked
 
 **Recommended Mitigations:** Instead of using a fixedfee pass fee level to the function.
 
+### [M-6] Pragma Non-Specification can lead to non-functional contracts when deployed to L2's
+
+**Description:** In all the contracts pragma is `^0.8.19` which means it will use the compiler either `0.8.19` or `greater than this version` 
 
 
 
