@@ -1,10 +1,10 @@
 # High
 
-### [H-1] The `borrow` and `Refinnace` function can be frontrun by the lender
+### [H-1] The `borrow` and `Refinance` function can be frontrun by the lender
 
-**Description:** Whenever a user tries to borrow/refinance a loan, a Lender can frontrun the user and update the `auction.length` or `interestRate` in his favour and the user might and up getting loan on unfavorable conditions such as very less `auction.length` or very high `InterestRate`.
+**Description:** Whenever a user tries to borrow/refinance a loan, a Lender can frontrun the user and update the `auctionLength` or `interestRate` in his favour and the user might and up getting loan on unfavorable conditions such as very less `auctionLength` or very high `interestRate`.
 
-The Lender is able to take the advantage of `auction.length` because the pool's `auctionLength` is assigned to the loan without the borrower having the possibility to define a minimum value
+The Lender is able to take the advantage of `auctionLength` because the pool's `auctionLength` is assigned to the loan without the borrower having the possibility to define a minimum value
 
 **Proof Of Concept:**
 
@@ -48,6 +48,18 @@ The Lender is able to take the advantage of `auction.length` because the pool's 
 * Consider subtracting the claimed rewards amount from `balance` in line 57 instead of storing the current WETH balance.
 * Additionally, consider reverting if no rewards are claimable, i.e., `claimable[msg.sender] == 0` by the caller (`msg.sender`) in the `claim` function.
 
+### [H-3] Hardcoded Router Address may cause Token LockUp in Non-Standard Networks
+
+**Description:**  In `Fees` contract the `swapRouter` address is hardcoded. The router address is set to "0xE592427A0AEce92De3Edee1F18E0157C05861564" and refers to a specific instance of ISwapRouter. This can cause issues when deployed on networks where this address does not correspond to the appropriate Uniswap router. In such cases, tokens may become locked in the protocol indefinitely, preventing withdrawals and potentially leading to financial losses.
+
+```solidity
+  ISwapRouter public constant swapRouter =
+        ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
+```
+
+**Impact:** The hardcoded address can lead to many issues when contract deployed on other networks. Tokens sent to the contract for swapping purposes may not be routed correctly, potentially resulting in funds being locked in the protocol forever.
+
+**Recommended Mitigations:** Pass the address of the SwapRouter in the constructor and/or create functionality for changing it, accessible only by the governance.
 
 # Medium
 
