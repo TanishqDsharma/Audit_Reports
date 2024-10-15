@@ -15,9 +15,39 @@ The Lender is able to take the advantage of `auction.length` because the pool's 
 **Impact:** Users might accept the loan that are having unfavourable conditiond for them such as very less `auctionLength` and very high interest rate.
 
 **Recommended Mitigations:**
- 
+* Define minimum `auctionLength` so that the lenders are not able to close the loan by updating the `auctionLength` by frontrunning th borrower.
+* The `refinance` data should include an expected `auctionLength` and `interestRate` property to guard against front-running attacks. This would enable borrowers to verify the interest rate before finalizing the loan refinancing, helping them avoid accepting loans with unfavorable terms.
 
-` 
+ 
+### [H-2] Weth Rewards are stuck in the `Staking` contract
+
+**Description:** The issue arises when the WETH rewards are sent to the staking contract and noone has staked the tokens yet (i.e when tokenSupply==0), In such a scenario, the index that distributes WETH rewards to stakers is not updated, causing the newly added rewards to be stuck in the contract.
+
+**Impact:** If there are not stakers and rewards are being sent to the contract these rewards are forever lost as these will not be tracked by the index.
+
+**Proof Of Concept:**
+* The total supply can be zero when the contract is recently deployed and no stakers have deposited any tokens after the deployment or can be zero if all the stakers have withdrawn there staking
+
+* If the `totalSupply` the reward index will not be updated due to the check at line 63. If the index is not updated the rewards sent will not be recorded. Although the index will not be updated but the balance will be updated due the this line `balance = WETH.balanceOf(address(this));` in `claim` function. amounts. 
+
+```solidity
+    ....
+        if (totalSupply > 0) {
+    ....
+```
+* Fees contract will also send new rewards to the staking contract time to time but those rewards will also not be tracked as index will not update. 
+
+* Example:
+  * Initial State: The contract has 50 WETH and no stakers (totalSupply == 0). The balance is 50 WETH, and the index reflects past rewards based on this amount.
+  * New Rewards Sent: The Fees contract sends 100 WETH to the contract. The WETH balance is now 150 WETH. The contract updates balance = 150 but does not update the index because totalSupply == 0.
+  * A staker deposits tokens, making totalSupply > 0. They call update(), but because the contract has already updated balance = 150, the condition if (_balance > balance) (i.e., if (150 > 150)) fails. The contract does not detect the newly deposited 150 WETH as rewards and thus does not distribute any of those rewards to the staker.
+
+
+**Recommended Mitigations:** 
+
+* Consider subtracting the claimed rewards amount from `balance` in line 57 instead of storing the current WETH balance.
+* Additionally, consider reverting if no rewards are claimable, i.e., `claimable[msg.sender] == 0` by the caller (`msg.sender`) in the `claim` function.
+
 
 # Medium
 
