@@ -113,6 +113,102 @@ The variable `amountOutMinimum` is having a harcoded value of zero which means t
 
 ### [H-7] Fee on transfer tokens will cause users to lose funds
 
+**Description:** Some ERC20 requires fees whenever `transfer` and `transferFrom` is called. If a contract does not allow for amounts to change after transfers, subsequent transfer operations based on the original amount will revert() due to the contract having an insufficient balance. However, a malicious user could also take advantage of this to steal funds from the pool.
+
+**Impact:** If `Fee on transfer` tokens are not accounted by the protocol correctly it can lead to calculation mistakes and can make the protocol function in an unintended way
+
+**Proof Of Concept:**
+
+1. UserA sends 100 of beedleloan token to the contract when calling `addToPool()`.
+2. beedleloan token contract takes 10% of the tokens (10 FEE).
+3. 90 beedleloan tokens actually get deposit in contract.
+4. `_updatePoolBalance(poolId, pools[poolId].poolBalance + amount);` will equal 100. We can see its taking the amount that we sent into account instead of taking the amount that is left after subtracting the fee.
+5. Attacker then sends 100 beedleloan tokens to the contract
+6. The contract now has 180 beedleloan tokens but each user has an accounting of 100 beedleloan.
+7. The attacker then tries to redeem his collateral for the full amount 100 beedleloan tokens.
+8. The contract will transfer 100 beedleloan tokens to attacker taking 10 of UserA's tokens with him.
+9. Attacker can then deposit back into the pool and repeat this until he drains all of UserA's funds.
+10. When UserA attempts to withdraw the transaction will revert due to insufficient funds.
+
+
+**Recommended Mitigations:**
+Consider protocol whitelist the token address or use balance before and after check to make sure the recipient receive the accurate amount of token when token transfer is performed.
+
+### [H-8] UnsiwapRouter Cannot Swap the tokens without approval
+
+**Description:** Tokens do not get approved to be spent by the Uniswap router, which will always make `sellProfits` revert and lock any tokens sent to this contract in the process.
+
+```solidity
+function sellProfits(address _profits) public {
+        require(_profits != WETH, "not allowed");
+        uint256 amount = IERC20(_profits).balanceOf(address(this));
+
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: _profits,
+                tokenOut: WETH,
+                fee: 3000,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
+        amount = swapRouter.exactInputSingle(params);
+        IERC20(WETH).transfer(staking, IERC20(WETH).balanceOf(address(this)));
+    }
+```
+
+**Impact:** In `Fees.sol`, `sellProfits` does not approve tokens to be spent by the Uniswap router. This will cause any call to `sellProfits` to always revert upon calling and will results in all tokens sent to the contract to be locked forever.
+
+**Recommended Mitigations:** Approve the tokens so the router can work without any error
+
+```diff
+function sellProfits(address _profits) public {
+        require(_profits != WETH, "not allowed");
+        uint256 amount = IERC20(_profits).balanceOf(address(this));
+
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: _profits,
+                tokenOut: WETH,
+                fee: 3000,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
++       IERC20(_profits).approve(address(swapRouter), IERC20(_profits).balanceOf(address(this)))
+        amount = swapRouter.exactInputSingle(params);
+        IERC20(WETH).transfer(staking, IERC20(WETH).balanceOf(address(this)));
+    }
+```
+### [H-9] `Lender::buyLoan` function can be frontrun by the Pool Lender to drain another user's pool 
+
+**Description:** When a user buys a loan, lender can only pass the `poolId` and no other parameter apart from this. This could lead to problems.
+
+For example:
+1. User create a pool with very high interest lets say `maximum interest`.
+2. From another wallet, the same user takes a borrow for 1000 USDC and gives 3000 USDT as collateral
+3. User A calls `startAuction` for this loan. User B sees the loan on auction and since it has high interest rate and is well-collateralized, decides to buy it. User B calls `buyLoan` and passes to corresponding `loanId`.
+4. User sees the pending transaction and front-runs it and changes his `pool.maxLoanRatio` to `type(uint256).max` (basically allowing for loans not sufficiently backed up by collateral)
+5. After changing the `maxLoanRatio`, user A calls `refinance` and sets the loan debt to user B's pool balance and changes the collateral to 1 USDT.
+6. After doing so, user A changes `maxLoanRatio` back to its original value and once again calls `startAuction` with the same `loanId`.
+7. Considering steps 6-8 all executed before user B's `buyLoan`, user B's call now executes and they've bought a borrow for all of their pool balance, backed up by pretty much no collateral.
+8. User A successfully executed the attack and has now taken a huge borrow which they have no incentive to repay as there isn't any valuable collateral attached to it.
+9. User A can then either withdraw their funds from their pool or repeat the attack.
+
+**Impact:** Pool lender can drain other pools.
+
+**Recommended Mitigations:**
+
+Add the below check:
+
+```solidity            
+if (loanRatio > pool.maxLoanRatio) revert RatioTooHigh();
+```
+
 # Medium
 
 ### [M-1] `Lender::_calculateInterest` Function is vulnerable to precision loss which allows makes `Lender::giveloan` to offer loans at less collateral
