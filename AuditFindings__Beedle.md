@@ -61,6 +61,58 @@ The Lender is able to take the advantage of `auctionLength` because the pool's `
 
 **Recommended Mitigations:** Pass the address of the SwapRouter in the constructor and/or create functionality for changing it, accessible only by the governance.
 
+### [H-4] Tokens with less decimals leads to losses 
+
+**Description:** The protocol assumes that user will provide tokens that have 18 decimals as collateral and doesn't take into consideration the tokens which have less than 18 decimals. If the collateral is having more than 18 decimals then we are able to borrow the loan with very less collateral and if the collateral is having less than 18 decimals then we need to pay very high collateral to get the loan.
+
+**Impact:**  Users wont be able to borrow loan if they are using collateral that having less decimals as the collateral amount needed would be very high to take the loan and if the users providing collateral with greater than 18 decimals than the users can take the loan without providing much collateral.
+
+**Proof Of concept:**
+Alice has a pool which lends DAI for USDC and max LTV is 75%, which means that if Bob wants to borrow 150 DAI, he should collateralize at least 200 USDC. But here is would be the result if we follow the current logic to calculate the LTV:
+
+```solidity
+uint256 loanRatio = (debt * 10 ** 18) / collateral;
+```
+
+Now, the above calculation will produce the below result:
+
+```solidity
+(150 * 10e18)/ 200 * 10e6;
+```
+
+We get `750 * 10^9` instead of the expected 750 LTV. This means that if Bob wants to borrow $150 of DAI, he should provide at least around $2,000,000 USDC.
+
+
+**Recommended Mitigations:**
+
+1. Make sure to scale debt and collateral based on the token decimals in order to calculate properly the `loanRatio`
+
+### [H-6] `Fees::sellProfits` function lacks slippage protection
+
+**Description:** This function can be easily exploited by the MEV as it fails to enforce the minimum token output.  Instead of ensuring that the user receives a minimum amount of tokens from the trade, the function can allow the user to receive zero tokens.
+
+```solidity
+ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: _profits,
+                tokenOut: WETH,
+                fee: 3000,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
+```
+
+The variable `amountOutMinimum` is having a harcoded value of zero which means that it allows for significant slippage in the token's value before executing the transaction. 
+
+**Impact:** The transactions can be manipulated to get more tokens out of the user.
+
+**Recommended Mitigations:** I recommend adding the `onlyOwner` modifier and setting the `amountOutMinimum` parameter to protect price slippage from MEV bots. If necessary, specify the `sqrtPriceLimitX96` parameter to set a stop price.
+
+### [H-7] Fee on transfer tokens will cause users to lose funds
+
 # Medium
 
 ### [M-1] `Lender::_calculateInterest` Function is vulnerable to precision loss which allows makes `Lender::giveloan` to offer loans at less collateral
