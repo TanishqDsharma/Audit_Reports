@@ -1,5 +1,24 @@
 # High
 
+### [H-1] The `borrow` and `Refinnace` function can be frontrun by the lender
+
+**Description:** Whenever a user tries to borrow/refinance a loan, a Lender can frontrun the user and update the `auction.length` or `interestRate` in his favour and the user might and up getting loan on unfavorable conditions such as very less `auction.length` or very high `InterestRate`.
+
+The Lender is able to take the advantage of `auction.length` because the pool's `auctionLength` is assigned to the loan without the borrower having the possibility to define a minimum value
+
+**Proof Of Concept:**
+
+1. If the the user/borrower calls `borrow` or `refinance` functions, the pool lender can frontrun and change the auctionLength to an unfavourable such as lender can change its value to 1 by using the `setPool` function. Since, the length of the auction is very less it will end in next block giving an oppurtunity to lender or literally anyone to seize the collateral.
+
+2. Malicious lenders could also exploit this vulnerability to trick borrowers into accepting loans with artificially low interest rates. However, after the refinance transaction is sniffed on-chain, the loan's interest rate can be manipulated to a very high value of MAX\_INTEREST\_RATE (1000%), causing financial losses if the borrower is unaware of the situation and responds too late.
+
+**Impact:** Users might accept the loan that are having unfavourable conditiond for them such as very less `auctionLength` and very high interest rate.
+
+**Recommended Mitigations:**
+ 
+
+` 
+
 # Medium
 
 ### [M-1] `Lender::_calculateInterest` Function is vulnerable to precision loss which allows makes `Lender::giveloan` to offer loans at less collateral
