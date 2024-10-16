@@ -209,6 +209,51 @@ Add the below check:
 if (loanRatio > pool.maxLoanRatio) revert RatioTooHigh();
 ```
 
+### [H-10] Borrowers can use refinance to cancel auctions so they can extend there loan indefinitely
+
+**Description**: When the lender auctions their loan, the borrowers can call the `Lender::refinance` function with same poolId causing the auction to be restarted.
+
+For Example:
+
+1. Lender creates a pool with 100 tokens and borrower borrows 20 tokens from the pool.
+2. Now, lender start the auction so that anyone else can buy the loan
+3. The borrower calls the `refinance` function and pass the same poolId which results in restart of auction initated by the lender.
+4. Borrower can repeat the process causing the lender to be unable to get the collateral.
+
+
+**Impact**: Everytime the `lender` starts the auction the `borrower` can call the `refinance` function with same poolID which is offering the loan currently results in restarting the auction.
+
+**Proof Of Code:**
+
+```solidity
+ function test_refinanceFromSamePool() public{
+        test_borrow();
+
+        vm.startPrank(borrower);
+        Refinance memory r = Refinance({
+            loanId: 0,
+            poolId: keccak256(
+                abi.encode(
+                    address(lender2),
+                    address(loanToken),
+                    address(collateralToken)
+                )
+            ),
+            debt: 100*10**18,
+            collateral: 100*10**18
+        });
+        Refinance[] memory rs = new Refinance[](1);
+        rs[0] = r;
+
+        lender.refinance(rs);
+        (,,,,,,,,uint auctionTimestamp,) = lender.loans(0);
+        assertEq(auctionTimestamp, type(uint256).max);
+```
+
+**Recommended Mitigations:** Add a validation in the `refinance` function that the new `poolId`, who will take the loan, is not the same as the one that has the loan.
+
+
+
 # Medium
 
 ### [M-1] `Lender::_calculateInterest` Function is vulnerable to precision loss which allows makes `Lender::giveloan` to offer loans at less collateral
