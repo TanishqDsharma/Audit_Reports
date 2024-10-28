@@ -73,3 +73,22 @@ SimpleERC20Escrow.sol: LINE 28
         return contractAllowlist[msgSender];
     }
 ```
+
+### [L-4] Solidity compiler is outdated and not specific
+
+**Description:**
+solc frequently releases new compiler versions. Using an old version prevents access to new Solidity security checks. So, its recommended to user newer or latest versions:
+The minimum required version must be 0.8.17; otherwise, contracts will be affected by the following important bug fixes.
+
+
+Consider using a specific version of Solidity in your contracts instead of a wide version. For example, instead of pragma solidity ^0.8.13;, use pragma solidity 0.8.13;
+
+```solidity
+pragma solidity ^0.8.13;
+```
+
+**Recommended Mitigations:** User newer or latest solc versions and use a specific compiler version also.
+
+### [L-5] 
+
+
