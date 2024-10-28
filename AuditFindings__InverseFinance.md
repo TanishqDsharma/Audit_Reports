@@ -89,6 +89,83 @@ pragma solidity ^0.8.13;
 
 **Recommended Mitigations:** User newer or latest solc versions and use a specific compiler version also.
 
-### [L-5] 
+### [L-5] Ownership Transfer without any confirmation
+
+**Description:**
+
+```solidity
+    function setGov(address _gov) public onlyGov { gov = _gov; }
+```
+The primary issue with this code snippet is that,it immediately transfers governance to the new address without any confirmation or acknowledgment from the new governance address (_gov). This approach has several risks:
+
+1. Irreversible Ownership Loss: If an invalid or incorrect address is accidentally set as _gov (such as the zero address or an address controlled by mistake), there is no way to revert or recover the governance role. This could result in the contract becoming "orphaned," with no valid owner or governor to manage it.
+
+2. Human Error: Even minor mistakes like typos can lead to setting an unintended address as the new owner. In a direct transfer approach, these mistakes can have critical, sometimes irreversible consequences for contract governance.
 
 
+### [L-6] `Fed::contraction` function missing `Market Paused` check
+
+**Description:** In the Fed contract, during the expansion method is checked that the market is not paused, this requirement is not done during the contraction.
+
+**Recommended Mitigation:**
+
+```solidity
+  function contraction(IMarket market, uint amount) public {
+        require(msg.sender == chair, "ONLY CHAIR");
+        require(dbr.markets(address(market)), "UNSUPPORTED MARKET");
++       require(!market.borrowPaused(), "CANNOT EXPAND PAUSED MARKETS");
+        uint supply = supplies[market];
+        require(amount <= supply, "AMOUNT TOO BIG"); // can't burn profits
+        market.recall(amount);
+        dola.burn(amount);
+        supplies[market] -= amount;
+        globalSupply -= amount;
+        emit Contraction(market, amount);
+    }
+```
+
+### [L-7] Avoid Using Magic Numbers:
+
+**Description:** `10,000` its being used in many instances in the code, it should be assigned to some variable and that variable should be used instead of this number
+
+```solidity
+        require(_collateralFactorBps < 10000, "Invalid collateral factor");
+        require(_liquidationIncentiveBps > 0 && _liquidationIncentiveBps < 10000, "Invalid liquidation incentive");
+        require(_replenishmentIncentiveBps < 10000, "Replenishment incentive must be less than 100%");
+```
+
+**Recommended Mitigations:** Use well defined variable names instead of numbers directly
+
+### [L-8] Avoid Using Harcoded Values:
+
+**Description:** It is not good practice to hardcode values, but if you are dealing with addresses much less, these can change between implementations, networks or projects, so it is convenient to remove these values from the source code.
+
+```solidity
+    IERC20 public immutable dola = IERC20(0x865377367054516e17014CcdED1e7d814EDC9ce4);
+```
+
+**Recommended Mitigations:** Instead of hardcoding the value, some way should be implemented to take different chains into account.
+
+### [L-9] Avoid use of same code in mulitple parts
+
+**Description:** The `Oracle::getPrice` and `Oracle::viewPrice` methods of the Oracle contract are very similar, the only difference being the following peace of code:
+
+```solidity if(todaysLow == 0 || normalizedPrice < todaysLow) {
+                dailyLows[token][day] = normalizedPrice;
+                todaysLow = normalizedPrice;
+                emit RecordDailyLow(token, normalizedPrice);
+            }
+```
+
+**Recommended Mitigations:** Use modifiers for re=using the code
+
+
+### [L-10] Not all functionalites been implemented
+
+**Description:** The code that contains “open todos” reflects that the development is not finished and that the code can change a prior release, with or without audit.
+
+```solidity
+constructor(IXINV _xINV) {
+        xINV = _xINV; // TODO: Test whether an immutable variable will persist across proxies
+    }
+```
