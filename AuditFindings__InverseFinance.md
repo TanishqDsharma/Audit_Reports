@@ -1,3 +1,99 @@
+# Medium
+
+### [M-1] Return Values are not being handled for `transfer` and `transferFrom`
+
+**Description:** Some implementations of ERC20's can return `false` on failue instead of reverting the transaction.
+
+**Impact:** Not properly handling the return values can lead to unexpected errors
+
+**Proof Of Code:**
+
+Instance 1:
+
+```solidity
+        dola.transfer(msg.sender, amount);
+```
+
+
+Instance 2:
+
+```solidity
+        collateral.transferFrom(msg.sender, address(escrow), amount);
+```
+Instance 3:
+
+```solidity
+        dola.transfer(to, amount);
+```
+
+**Recommended Mitigations:**
+Implement proper mechanism for handling the return values.
+
+### [M-2] Using `latestAnswer` instead of `latestRoundData` which results in not validating the returned price accurately
+
+**Description:**
+
+In the viewPrice and getPrice functions, the code currently fetches the price with:
+
+```solidity
+ uint price = feeds[token].feed.latestAnswer();
+ require(price > 0, "Invalid feed price");
+```
+
+While this checks that the price is greater than zero, it does not verify whether the price data is fresh. Chainlink's latestAnswer method is deprecated because it only returns the price value and doesn't include additional metadata that can verify the price's freshness.
+
+The problem with the stale price,is that it can make calculations for user credit, borrowing limits, or collateral requirements incorrect.
+
+**Impact:** If the price has fallen but the stale price shows it is still high, the protocol might mistakenly consider a user's collateral to be more valuable than it is, thus affecting liquidations or borrowing capacity.
+
+**Proof Of Concept:**
+
+1. Alice calls the `depositAndBorrow` function, where she deposits WETH (Wrapped Ethereum) as collateral and borrows DOLA (a stablecoin) against it.
+
+2. Bob, seeing that Alice has borrowed against her WETH, tries to liquidate her position by calling the `liquidate` function.
+   * To determine whether Alice’s position is eligible for liquidation, the system uses getCreditLimitInternal to calculate her credit limit. This function fetches the latest price data from Chainlink’s oracle (using getPrice or viewPrice) to assess the value of Alice’s WETH collateral.
+   * At this moment, the Chainlink oracle returns a fresh, accurate price for WETH, so Alice’s credit limit is calculated correctly. The system recognizes that Alice’s debt is not under water, meaning her collateral value sufficiently covers her DOLA loan. Therefore, Bob’s `liquidate` transaction fails and reverts.
+
+3. After sometime, Bob calls the liquidate function again, hoping to liquidate Alice’s debt.
+   * Now, the getCreditLimitInternal function once more fetches the WETH price, but this time it retrieves a stale price from Chainlink’s oracle. Although this price is positive, it’s outdated and may no longer reflect the current market value of WETH.
+   * Since the stale price is used in the calculation, Alice’s collateral value is calculated incorrectly, potentially undervaluing it. This incorrect valuation might show Alice’s debt as under-collateralized or “under water,” meaning her WETH collateral supposedly no longer sufficiently covers her DOLA debt.
+
+4. Due to the stale price, the system mistakenly determines that Alice’s position is eligible for liquidation. Bob’s liquidate transaction is now successful, allowing him to seize some of Alice’s WETH collateral.
+
+**Recommended Mitigations:**
+
+Use chainlinks `latestRoundData`:
+
+```solidity
+ (uint80 roundId, int256 answer, , uint256 updatedAt, uint80 answeredInRound) = feeds[token].feed.latestRoundData();
+            require(answeredInRound >= roundId, "answer is stale");
+            require(updatedAt > 0, "round is incomplete");
+            require(answer > 0, "Invalid feed answer");
+            uint256 price = uint256(answer);
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Low
 
 ### [L-1] Signature Malleablity in DBR.sol and Market.sol functions:
