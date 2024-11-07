@@ -65,8 +65,6 @@ SimpleERC20Escrow.sol: LINE 28
 
 **Description:** `tx.origin` is a global variable in Solidity that returns the address of the account that sent the transaction.
 
-****:
-
 ```solidity
  function borrowAllowed(address msgSender, address, uint) public view returns (bool) {
         if(msgSender == tx.origin) return true; //@audit EOA bypass
@@ -148,7 +146,7 @@ The primary issue with this code snippet is that,it immediately transfers govern
 
 ### [L-9] Avoid use of same code in mulitple parts
 
-**Description:** The `Oracle::getPrice` and `Oracle::viewPrice` methods of the Oracle contract are very similar, the only difference being the following peace of code:
+**Description:** The `Oracle::getPrice` and `Oracle::viewPrice` methods of the Oracle contract are very similar, the only difference being the following piece of code:
 
 ```solidity if(todaysLow == 0 || normalizedPrice < todaysLow) {
                 dailyLows[token][day] = normalizedPrice;
@@ -157,7 +155,7 @@ The primary issue with this code snippet is that,it immediately transfers govern
             }
 ```
 
-**Recommended Mitigations:** Use modifiers for re=using the code
+**Recommended Mitigations:** Use modifiers for re-using the code
 
 
 ### [L-10] Not all functionalites been implemented
@@ -169,3 +167,31 @@ constructor(IXINV _xINV) {
         xINV = _xINV; // TODO: Test whether an immutable variable will persist across proxies
     }
 ```
+
+### [L-11] Integers values are not checked
+
+**Description:**
+
+In `DBR.sol`, when ` replenishmentPriceBps = _replenishmentPriceBps;` is assigned to a value its not being checked that is should not be equal to zero.
+
+In `Market.sol`, `replenishmentIncentiveBps` is not checked to be > 0 during the constructor, nevertheless it’s checked in `setReplenismentIncentiveBps`
+
+### [L-12] Events are not being emitted on every state change
+
+**Description:** The Market.pauseBorrows, Market.setLiquidationFeeBps, Market.setLiquidationIncentiveBps, Market.setReplenismentIncentiveBps, Market.setLiquidationFactorBps, Market.setCollateralFactorBps, Market.setBorrowController, Market.setOracle methods do not emit an event when the state changes, something that it’s very important for dApps and users.
+
+### [L-13] Oracle not compatible with tokens of 19 or more decimals
+
+Keep in mind that the version of solidity used, despite being greater than 0.8, does not prevent integer overflows during casting, it only does so in mathematical operations.
+
+In the case that feed.decimals() returns 18, and the token is more than 18 decimals, the following subtraction will cause an underflow, denying the oracle service.
+
+```solidity
+    uint8 feedDecimals = feeds[token].feed.decimals();  // 18 => [ETH/DAI] https://rinkeby.etherscan.io/address/0x74825dbc8bf76cc4e9494d0ecb210f676efa001d#readContract
+    uint8 tokenDecimals = feeds[token].tokenDecimals;   // > 18
+    uint8 decimals = 36 - feedDecimals - tokenDecimals; // overflow
+```
+
+All pairs have 8 decimals except the ETH pairs, so a token with 19 decimals in ETH, will fault.
+
+
