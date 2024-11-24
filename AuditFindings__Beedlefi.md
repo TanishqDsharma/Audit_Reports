@@ -216,9 +216,84 @@ unction test_exploit7() public {
 
 **Recommended Mitigations:** Always follow the:> Checks - Effect - Interactions CEI) pattern
 
-### [H-2] `Beedle::Lender.sol` can be drained due to Rentrancy in `setPool` function
+### [H-3] `Beedle::Fees.sol` lacks slippage protection
 
-**Description:**
+**Description:** The `Fees::sellProfits()` functions lacks slippage protection, the `amountOutMinimum` and `sqrtPriceLimitX96` are set to `0` when swapping in uniswap pools this makes the user vulnerable to price manipulation attacks, and user will end getting very less or no tokens. 
+
+```solidity
+function sellProfits(address _profits) public {
+        require(_profits != WETH, "not allowed");
+        uint256 amount = IERC20(_profits).balanceOf(address(this));
+
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: _profits,
+                tokenOut: WETH,
+                fee: 3000,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amount,
+@>                amountOutMinimum: 0, 
+@>                sqrtPriceLimitX96: 0 
+            });
+
+        amount = swapRouter.exactInputSingle(params);
+        IERC20(WETH).transfer(staking, IERC20(WETH).balanceOf(address(this)));
+    }
+}
+
+```
+
+**Impact:** When swapping tokens user can end up with very less or losing up all of the tokens.
+
+**Recommended Mitigations:**
+Specify `amountOutMinimum` with some value instead of zero and if necessary, specify the `sqrtPriceLimitX96` parameter to set a stop price.
+
+
+### [H-4] Missing checks in `buyLoan` function 
+
+**Description:** The `buyLoan` function is not having any check for `minLoanSize` and `maxLoanRatio`. The problem is when there is no `maxloanRatio` check,  malicious actors can take advantage of this by buying a loan after an auction is started for very less collateral and can borrow a huge loan.
+
+**Proof Of Code**:
+
+1. User create a pool with very high interest lets say maximum interest.
+2. From another wallet, the same user takes a borrow for 1000 USDC and gives 3000 USDT as collateral
+3. User A calls startAuction for this loan. User B sees the loan on auction and since it has high interest rate and is well-collateralized, decides to buy it. User B calls buyLoan and passes to corresponding loanId.
+4. User sees the pending transaction and front-runs it and changes his pool.maxLoanRatio to type(uint256).max (basically allowing for loans not sufficiently backed up by collateral)
+5. After changing the maxLoanRatio, user A calls refinance and sets the loan debt to user B's pool balance and changes the collateral to 1 USDT.
+6. After doing so, user A changes maxLoanRatio back to its original value and once again calls startAuction with the same loanId.
+7. Considering steps 6-8 all executed before user B's buyLoan, user B's call now executes and they've bought a borrow for all of their pool balance, backed up by pretty much no collateral.
+8. User A successfully executed the attack and has now taken a huge borrow which they have no incentive to repay as there isn't any valuable collateral attached to it.
+9. User A can then either withdraw their funds from their pool or repeat the attack. 
+
+**Impact:** Users will end up losing there funds
+
+**Recommended Mitigations:** 
+
+Add the below check:
+
+```solidity
++        uint256 loanRatio = (totalDebt * 10 ** 18) / loan.collateral;
++        if (loanRatio > pools[poolId].maxLoanRatio) revert RatioTooHigh();
+```
+
+### [H-4] Missing `msg.sender` check in `buyLoan` function 
+
+**Description:** Due to insufficient checks in `buyLoan` function, it allows malicious actors to buy loan from auction by passing a `poolId` that they don't own (i.e is they are not the lender of the pool). As a result, the function incorrectly updates the loan's ownership to the malicious actor's address without requiring any collateral transfer.
+
+The malicious actor identifies a loan in the auction and decides to purchase it. Using the `buyLoan` function, the malicious actor passes a `poolId` that they do not own and also may not Have the same loanTokens and collateralTokens ,since there are no checks for mismatching tokens which gives the malicious actor a lot of choice from pools. As a result, the function updates the loan ownership to the malicious actor's address while taking the debt from the pool provided by the malicious actor.
+
+**Proof Of Code:**
+
+********************************
+
+**Impact:** Loan is permanently bricked and can never be repaid as attacker has become loan.lender.
+
+**Recommended Mitigations:**
+
+1. Lender.buyLoan() can validate that msg.sender is the pool's lender. This would stop anyone from matching an auctioned loan with a pool, so according to the system design this is not a great option,
+2. Change [L518](https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Lender.sol#L518) to set loans\[loanId].lender to pools\[poolId].lender instead of msg.sender. This preserves the system design that anyone can match an auctioned loan with a pool so this is the better option.
+
 
 
 # Medium 
