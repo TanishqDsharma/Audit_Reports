@@ -325,6 +325,8 @@ Add the below line to the code:
 
 **Recommended Mitigations:**
 
+### [H-7] 
+
 # Medium 
 
 # Low
