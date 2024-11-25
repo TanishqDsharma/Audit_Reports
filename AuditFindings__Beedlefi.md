@@ -294,7 +294,36 @@ The malicious actor identifies a loan in the auction and decides to purchase it.
 1. Lender.buyLoan() can validate that msg.sender is the pool's lender. This would stop anyone from matching an auctioned loan with a pool, so according to the system design this is not a great option,
 2. Change [L518](https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Lender.sol#L518) to set loans\[loanId].lender to pools\[poolId].lender instead of msg.sender. This preserves the system design that anyone can match an auctioned loan with a pool so this is the better option.
 
+### [H-5] Revert on `Beedle::Fees::sellProfits` function
 
+**Description:** In the `Beedle::Fees::sellProfits` function token are not approved to be spent by the uniswap router. This will cause any call to `sellProfits` to always revert upon calling and will results in all tokens sent to the contract to be locked forever.
+
+```solidity
+	amount = swapRouter.exactInputSingle(params);
+        IERC20(WETH).transfer(staking, IERC20(WETH).balanceOf(address(this)));
+```
+
+**Impact:** This issue will make any ERC20 tokens sent to be contract to be permanently frozen in the contract.
+
+**Recommended step:**
+
+Add the below line to the code:
+
+```solidity
+    IERC20(_profits).approve(address(swapRouter), IERC20(_profits).balanceOf(address(this)))
+    amount = swapRouter.exactInputSingle(params);
+    IERC20(WETH).transfer(staking, IERC20(WETH).balanceOf(address(this)));
+```
+
+### [H-6] Borrows can prevent the loans from being liquidated 
+
+**Description:** `Lender.buyLoan()` doesn't check if the poolId parameter is the same pool that has auctioned the loan. An attacker can use Lender.buyLoan() to grief the selling pool by stopping the auction via buying the auctioned loan back to the same pool. This also reduces that pool's balance and increases that pool's outstanding loans, negatively impacting the pool's financials.
+
+**Impact:** Attacker can grief any auction stopping it at will by buying the auctioned loan back to the originating pool. This also decreases the pool's balance & increases the pool's outstanding loans, hurting the pool financially.
+
+**Proof Of Code:**
+
+**Recommended Mitigations:**
 
 # Medium 
 
