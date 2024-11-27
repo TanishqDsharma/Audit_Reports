@@ -487,6 +487,53 @@ Only implement the line:
      	pools[poolId].poolBalance -= debt;
 ```
 
+### [H-9] `Beedle::Lender.sol` doesn't account for `Rebasing`, `Inflationary`, `Deflationary` and `Fee on Transfer` tokens
+
+**Description:** 
+
+The current implementation of the `Lender` contract does not handle these kinds of tokens:
+
+* Rebasing tokens
+* Inflationary tokens
+* Deflationary tokens
+* Tokens with fee-on-transfer
+
+The accounting variables on the `Loan` and `Pool` structs will store an incorrect value that could lead to reverts or further accounting errors.
+
+**Impact:** Since, the above token behaviours are not taken into account when performing calculation it can result in accounting errors or reverts.
+
+**Recommended Mitigations:**
+
+The protocol should choose one of the following options:
+
+1. Have a list of whitelisted collateral and lending tokens that can be used
+2. Correctly account the real amount that has been deposited to the `Lender` contract or from the `Lender` contract after the transfer has happened
+
+### [H-10] `Borrow` and `Refinance` can be front-runned by the `Lender` leading to setting of unfavourable pool conditions
+
+**Description:**
+
+If a user/borrower calls the `borrow` or `refinance` functions, the pool lender can front-run and change the pool's `auctionLength` to an unfavorable (for the borrower) and very small value (e.g., `1`) by using the `setPool` function. Subsequently, the lender of the pool can start the auction for the loan. Due to the short `auctionLength`, the auction will end early. This allows the lender (or basically anyone) to seize the collateral in the next block.
+
+* The `borrow` function assigns the `pool.auctionLength` to the loan in [L259](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L259)
+* The `refinance` function updates the loan's auction length to the `pool.auctionLength` in [L694](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L694)
+
+Another, problem is that the borrower can be frontrunned by a malicious lender changing the pool interest or a legitimate lender can change his pool interests while the `refinance()` function is executing making the borrower to take non-agreed interest by chance. Please see the next scenario:
+
+1. Borrower calls the `refinance()` function because he wants to transfer his debt to a pool which has a 0.01% interest rate.
+2. Legitimate lender just change his pool interests to 0.3% using the [updateInterestRate()](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L221) function. This function is executed before the `step1` because the lender pay more gas.
+3. The `refinance()` transaction is now executed but the pool interest has increased, now the borrower [end up with a different pool interest](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L688) (`0.3%`).
+
+
+**Impact:** This can lead huge losses for borrowers
+
+**Recomended Mitigations:**
+
+Add a validation in the `refinance()` function which helps the borrower to specify the interest he is allowed to pay:
+
+Consider allowing the borrower to define a minimum auction length when borrowing or refinancing and validate if the pool fulfills this criterion. Additionally, consider adding a reasonable minimum value for the auction length (e.g., 1 hour or 1 day) to allow the borrower to act appropriately.
+
+
 
 # Medium 
 
