@@ -557,6 +557,27 @@ constructor(address _swapRouter) {
 }
 ```
 
+### [H-12] `giveLoan` increases the TotalDebt
+
+**Description:** Loans charge simple interest based on the interestRate parameter in the pool. However when a loan is transferred via giveLoan(), the debt over which the interest is charged is increased.
+
+```solidity
+	uint256 totalDebt = loan.debt + lenderInterest + protocolInterest;
+```
+
+Then the original debt is overwritten by totalDebt:
+
+```solidity
+loans[loanId].debt = totalDebt;
+```
+
+That means that the interest in this point is calculated based on `debt+lenderInterest+protocolInterest` rather than the debt when the loan was initialized. This means that the debt is COMPOUNDED every time it is transferred via `giveLoan()` compared to the lower simpleInterest charged when the loan is never transferred.
+
+**Impact:** This issue can lead to borrower paying very high amount to get collateral back 
+
+**Recommended Mitigations:** That means that the interest in this point is calculated based on `debt+lenderInterest+protocolInterest` rather than the debt when the loan was initialized. This means that the debt is COMPOUNDED every time it is transferred via `giveLoan()` compared to the lower simpleInterest charged when the loan is never transferred.
+
+
 # Medium 
 
 # Low
