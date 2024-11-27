@@ -580,4 +580,157 @@ That means that the interest in this point is calculated based on `debt+lenderIn
 
 # Medium 
 
+### [M-1] Precision Loss due to `Division Before Multiplication`
+
+**Description:** The `_calculateInterest` function results in a small precision loss because of  `Division Before Multiplication`.
+
+The `_calculateInterest` calculates the intrest by using this line of code:
+
+```solidity
+	interest = (l.interestRate * l.debt * timeElapsed) / 10000 / 365 days; 
+```
+
+Next, it calculates the fees using the the interest variable:
+
+```solidity
+ fees = (lenderFee * interest) / 10000; 
+```
+Here, precision loss occurs as Division was happend first to calculate intrest and then its used in multiplication with lenderFee to calculate `fees`.
+
+**Impact:** The computed `fees` (`protocolInterest`) returned by the `_calculateInterest()` can suffer from the rounding down issue, resulting in a small precision loss, especially when a loan token has small decimals (e.g., [GUSD (Gemini dollar)](https://etherscan.io/token/0x056fd409e1d7a124bd7017459dfea2f387b6d5cd) has *2 decimals*).
+
+
+**Recommended Mitigations:** Improve the formula to eliminate precision loss.
+
+### [M-2]: If `borrower` or `lender` gets blacklisted by the asset, the collateral or loan funds then be forever frozen in the pool
+
+**Description:** Its impossible for `borrower` or `lender` to transfer there funds if for some reason they got blacklisted by the asset token. These funds will be permanently frozen as now there is no mechanics to move them to another address or specify the recipient for the transfer.
+
+* If during the duration of a loan the borrower or lender got blacklisted by `collateral asset` contract, let's say it is USDC, there is no way to retrieve the collateral. These collateral funds will be permanently locked at the Pool contract balance.
+* This happens in [repay function](https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Lender.sol#L329) (which affects the borrower) and [seizeLoan function](https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Lender.sol#L565) (which affects the lender). There is no option to specify the address receiving the collateral asset.
+* For `loan asset's case` (which affects the lender) there is a withdrawal possibility of loan funds via Lender.sol's [removeFromPool()](https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Lender.sol#L198C14-L198C28), but for the lender there is no way to transfer funds due to ownership or even specify transfer recipient, so the corresponding loan funds will be frozen with the pool if current lender is blacklisted.
+
+**Impact:** Principal funds of borrower or lender can be permanently frozen in full, but blacklisting is a low probability event.
+
+**Recommended Mitigations:** 
+
+Consider adding the `recipient` argument to the `repay()`, `seizeLoan()` and `removeFromPool()` functions, so the balance beneficiary `msg.sender` can specify what address should receive the funds
+
+### [M-3] No Deadline for Token Swapping in `Fees` contract
+
+**Description:** The `deadline` parameter in the `sellProfits` function is set to `block.timestamp`, which means function will accept token swap at any block number (i.e., no expiration deadline).
+
+```solidity
+    function sellProfits(address _profits) public {
+        require(_profits != WETH, "not allowed");
+        uint256 amount = IERC20(_profits).balanceOf(address(this));
+
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: _profits,
+                tokenOut: WETH,
+                fee: 3000,
+                recipient: address(this),
+@>              deadline: block.timestamp,
+                amountIn: amount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
+
+        amount = swapRouter.exactInputSingle(params);
+        IERC20(WETH).transfer(staking, IERC20(WETH).balanceOf(address(this)));
+    }
+```
+
+**Impact:** Without an expiration deadline, a malicious miner/validator can hold a transaction until they favor it or they can make a profit. As a result, the `Fees` contract can lose a lot of funds from slippage.
+
+**Recommended Mitigations:** Specify a proper deadline value.
+
+### [M-4] Single Ownership Transfer Process
+
+**Description:** The custom contract Ownable.sol is inherited by Lender.sol which gives ownable functionality. However, its implementation is not safe currently as the process is 1-step which is risky due to a possible human error and such an error is unrecoverable. For example, an incorrect address, for which the private key is not known, could be passed accidentally.
+
+**Impact:** Critical functions using the onlyOwner modifier will be locked - `setLenderFee`, `setBorrowerFee` and `setFeeReceiver`
+
+**Recommeded Mitigations:**
+
+Implement the change of ownership in 2 steps:
+
+1. Approve a new address as a pendingOwner
+2. A transaction from the pendingOwner address claims the pending ownership change.
+
+### [M-5] Fixes Fee in TokenSwapping in `Fees` contract
+
+**Description:** UniswapV3 introduced multiple fee levels to cater to different types of pools and trading  behaviors. Not all pools in Uniswap v3 are created with the 0.3% fee rate. Additionally, even if a 0.3% fee pool exists for a pair,it might not necessarily be the most liquid or the optimal pool for the trade. Relying solely on a hardcoded fee level can lead to inefficiencies and potential failures in the swap operation.
+
+For instance, the optimal route to swap USDC for WETH is using the 0.05% (500) swap fee pool, which has significantly more liquidity than the 0.3% (3000) swap fee pool and thus less slippage.
+
+Additionally, if the desired pool is not available, the swap will fail, or an attacker could exploit this by creating an imbalanced  pool with the desired swap fee and stealing the tokens.
+
+**Impact:** Using fixed fee level when swap tokens  may lead to some fee tokens being locked in contract.
+
+**Recommended Mitigations:** 
+
+```solidity
+-   function sellProfits(address _profits) public {
++   function sellProfits(address _profits, uint24 fee) public {
+        require(_profits != WETH, "not allowed");
+        uint256 amount = IERC20(_profits).balanceOf(address(this));
+
+
+        ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+            .ExactInputSingleParams({
+                tokenIn: _profits,
+                tokenOut: WETH,
+-               fee: 3000,
++               fee: fee,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            });
+
+
+        amount = swapRouter.exactInputSingle(params);
+        IERC20(WETH).transfer(staking, IERC20(WETH).balanceOf(address(this)));
+    }
+```
+
+### [M-6] Non-Fixed Pragma usage can result in non-functional contract when deployed to Arbitrum
+
+**Description:** Pragma has been set to ^0.8.19 allowing the contracts to be compiled with a compiler equal or greater than 0.8.19. The problem with compiling is that Arbitrum is NOT compatible with 0.8.20 and later.
+
+Contracts compiled with non specified versions will result in a non-functional or potentially damaged version that won't behave as expected. The default behaviour of compiler would be to use the newest version which would mean by default it will be compiled with the 0.8.20 version which will produce broken code.
+
+**Proof Of Code:** 
+
+Instances:
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Staking.sol#L2>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Lender.sol#L2>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Fees.sol#L2>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Beedle.sol#L2>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/interfaces/IERC20.sol#L2>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/interfaces/ISwapRouter.sol#L2>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/utils/Errors.sol#L2>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/utils/Ownable.sol#L2>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/utils/Structs.sol#L2>
+
+**Impact:** Non-functional contracts when deployed to Arbitrum.
+
+**Recommended Mitigations:** Lock or Constrain pragma as follows: pragma solidity 0.8.19 or pragma solidity >=0.8.0 <=0.8.19
+
+
+
+
+
 # Low
