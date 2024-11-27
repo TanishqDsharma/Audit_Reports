@@ -533,7 +533,29 @@ Add a validation in the `refinance()` function which helps the borrower to speci
 
 Consider allowing the borrower to define a minimum auction length when borrowing or refinancing and validate if the pool fulfills this criterion. Additionally, consider adding a reasonable minimum value for the auction length (e.g., 1 hour or 1 day) to allow the borrower to act appropriately.
 
+### [H-11] In `Beedle::Fees` contract router address is hardcoded which can lead to loss of funds
 
+**Description:** This audit report provides an assessment of the contract containing the hardcoded router address for token swaps. The router address is set to "0xE592427A0AEce92De3Edee1F18E0157C05861564" and refers to a specific instance of ISwapRouter. The hardcoded router address can cause issues when deployed on networks where this address does not correspond to the appropriate Uniswap router. 
+
+```solidity
+
+    /// uniswap v3 router
+    ISwapRouter public constant swapRouter =
+        ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
+```
+
+**Impact:** Tokens may become locked in the protocol indefinitely, preventing withdrawals and potentially leading to financial losses.
+
+**Recommended Mitigations:**
+
+Avoid using hardcoded values, instead use something like this:
+
+```solidity
+constructor(address _swapRouter) {
+    require(_swapRouter != address(0), "Invalid router address");
+    swapRouter = ISwapRouter(_swapRouter);
+}
+```
 
 # Medium 
 
