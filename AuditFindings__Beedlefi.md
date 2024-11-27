@@ -730,7 +730,77 @@ Instances:
 **Recommended Mitigations:** Lock or Constrain pragma as follows: pragma solidity 0.8.19 or pragma solidity >=0.8.0 <=0.8.19
 
 
+### [M-7] Some ERC-20 token reverts on `Zero Value Transfer`
+
+**Description:**  Some tokens revert on zero-value transfers. Considering both `borrowerFee` and `lenderFee` could be changed to 0 and loan's could happen for short-enough time for interest to round down to 0, it is completely possible for fees' value to be 0. If token which reverts on zero-value transfer is used, the transaction will revert and users will be unable to `borrow`, `repay`, `giveLoan`, `buyLoan`, `seizeLoan`.
+
+**Impact:** Users transactions will revert and they will be unable to call `borrow`, `repay`, `giveLoan`, `buyLoan`, `seizeLoan`.
+
+**Recommended Mitigations:** Upon sending fees, make sure it is a non-zero value.
+
+### [M-8] Lower Debt taken for Higher Time or vice-vera results in Intrest Free Loan
+
+**Description:** Any case where `(l.interestRate * l.debt * timeElapsed)` is lower than `3.1536e11` will make it an interest-free loan. Loans accrue interest for every second since being taken out. The issue arises when loans are taken in low-decimal high-value tokens like WBTC. Such tokens' decimals allow the `interest` calculation to round down to 0 due to the `(l.interestRate * l.debt * timeElapsed)` calculation being lower than `3.1536e11`(10000 \* 365 days in seconds).
+
+```solidity
+    function _calculateInterest(Loan memory l) internal view returns (uint256 interest, uint256 fees) {
+        uint256 timeElapsed = block.timestamp - l.startTimestamp;
+ @>       interest = (l.interestRate * l.debt * timeElapsed) / 10000 / 365 days; //@audit if debt is very small negligble intrest or almost free
+ @>       fees = (lenderFee * interest) / 10000; //@audit
+        interest -= fees;
+    }
+```
+
+For example: a loan with 1e6 worth of WTBC(around 300$) and a fee of 1000 basis points(10%) for 300 seconds will be interest-free. The same can be achieved with lower debt amounts for longer periods of time. For example, if the loan gets segmented into 10 smaller ones with 1e5 worth of debt in each the interest-free period will be more than 3000 seconds, and so on.
+
+**Proof Of Code:**
+
+Consider the [GUSD (Gemini dollar) token](https://etherscan.io/token/0x056fd409e1d7a124bd7017459dfea2f387b6d5cd), which has *2 decimals*.
+
+* `l.debt`: 100 GUSD
+* `l.interestRate`: 100 (1%) per year
+* `timeElapsed`: 86400 seconds (1 day)
+* `lenderFee`: 100 (1%)
+
+```solidity
+interest = (l.interestRate * l.debt * timeElapsed) / 10000 / 365 days
+		 = (100 * (100 * 1e2) * 86400) / 10000 / 31536000
+		 = 8640 / 31536
+		 = 0 (rounding down; since Solidity has no fixed-point numbers)
+
+fees = (lenderFee * interest) / 10000
+     = (100 * 0) / 10000
+     = 0
+```
+
+As you can see, the resulting `interest` and `fees` will become 0 due to the rounding down since Solidity has no fixed-point numbers. Consequently, a borrower does not need to pay the lender interest or protocol interest.
+
+**Impact:** Loan can be borrowed without interest
+
+**Recommended Mitigations:** Take decimal precision into account
+
+
+### [M-9] Setting Borrower Fees to Zero can result into DOS of borrow functionality
+
+**Decription:** If the protocol decides for whatever reason to set the protocol borrowing fee to 0 (example to encourage users to use the protocol), then a malicious actor can DoS all borrow operations by:
+
+1. front-running any loan operation, fully borrowing all available pool tokens
+2. normal user transaction would revert as there are no more tokens to borrow in the pool
+3. malicious actor would also back-run the repaying of all his debt to the pool
+
+By doing this, borrowing from any pool can be blocked. Also, the cost required to perform this attack is very low (no interest/fee to be paid, only gas cost required) and the attack results in the DoS of one of the most crucial feature of the protocol, i.e. borrow.
+
+**Impact:** Users will not be able to perform borrow operations
+
+**Recommended Mitigations:**
+
+Modify the `_calculateInterest` to attribute a default protocol fee as to make this attack economically unsustainable.
+
+The simplest alternative is to not allow the setting of borrower fees to 0. However this brings some limitations, as protocol may want to weaver any fees at one point but could not because of this situation.
+
+
 
 
 
 # Low
+
