@@ -798,9 +798,107 @@ Modify the `_calculateInterest` to attribute a default protocol fee as to make t
 
 The simplest alternative is to not allow the setting of borrower fees to 0. However this brings some limitations, as protocol may want to weaver any fees at one point but could not because of this situation.
 
-
-
-
-
 # Low
+
+### [L-1] Missing Zero Address Check
+
+**Description:** There are many instances in the codebase that do not check for zero address. The `Lender::setFeeReceiver()` lacks checking the `address(0)`, leading to transaction reverts on the `borrow()`, `repay()`, `giveLoan()`, `buyLoan()`, `seizeLoan()`, and `refinance()`.
+
+**Impact:** If the `address(0)` is inputted by mistake, the following functions will revert transactions.
+
+* `borrow()` in [L267](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L267)
+* `repay()` in [L325](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L325)
+* `giveLoan()` in [L403](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L403)
+* `buyLoan()` in [L505](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L505)
+* `seizeLoan()` in [L563](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L563)
+* `refinance()` in [L651](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L651) and [L656](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L656)
+
+**Recommended Mitigations:** Implement a Zero Address Check
+
+### [L-2] `Beedle::Lender::giveLoan` function fails 
+
+**Description:** Lender fails to giveLoan because of inconsistent length between `loadIds` and `poolIds`. The function assumes that loanIds and PoolIds are of equal lenght but thats not the case. For example, the lender mistakenly leaves out one of the `poolIds` which means the last `loanId` does not map to any `poolId` since `loanIds.length = poolIds.length + 1`. Hence, since there is an out-of-bounds error when getting the pool id, `poolId = poolIds[i]`, the entire function will revert due to this error.
+
+
+```solidity
+  for (uint256 i = 0; i < loanIds.length; i++) { 
+            uint256 loanId = loanIds[i];
+            bytes32 poolId = poolIds[i];
+	...........
+```
+ 
+**Impact:** Transactions will revert as lengths of the arrays are not equal, so users will unable to giveLoan.
+
+**Recomended Mitgations:** 
+
+```solidity
+function giveLoan(uint256[] calldata loanIds,bytes32[] calldata poolIds) external {
++   if (loanIds.length != poolIds.length) revert GiveLoanLengthMismatch();
+    for (uint256 i = 0; i < loanIds.length; i++) {
+        uint256 loanId = loanIds[i];
+        bytes32 poolId = poolIds[i];
+        ...
+    }
+}
+```
+
+### [L-3] Missing Events Emission
+
+**Description:** There are many instances in the entires codebase that doesn't emit events on Important State changes.
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Lender.sol#L84>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Lender.sol#L92>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Lender.sol#L100>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Staking.sol#L38>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Staking.sol#L46>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Staking.sol#L53>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Staking.sol#L61>
+
+<https://github.com/Cyfrin/2023-07-beedle/blob/main/src/Staking.sol#L80>
+
+
+**Impact:** This results into loss of important information that is not being tracked
+
+**Recomended Mitigations:** Add events any important state change takes place
+
+### [L-4] Zero Amount Not Allowed checks are missing
+
+**Description:** In `Beedle::Beedle.sol` functions are missing checks that validate values passed is not zero. These function includes `mint`,`_burn`,`_mint` etc. In `Staking.sol`s functions `deposit` and `withdraw` the check for `_amount` zero is not done as well.
+
+There are five instances of this in the contract:
+\[[Instance 1](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Beedle.sol#L36)]
+\[[Instance 2](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Beedle.sol#L29)]
+\[[Instance 3](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Beedle.sol#L22)]
+\[[Instance 4](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Staking.sol#L38)]
+\[[Instance 5](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Staking.sol#L46)]
+
+
+**Impact:** Users can pass Zero values
+
+**Recomended Mitigations:** Implements checks for validating values passed are not zero.
+
+### [L-5] `block.timstamp` can be manipulated
+
+**Description:** The `block.timestamp` represents the time at which the block is mined and is determined by the miner. Although Ethereum has mechanisms in place to prevent blatant timestamp manipulation, miners still have some degree of control over the block timestamp within certain limits, known as "block time drift." This drift allows miners to adjust the timestamp by a small range, which introduces a possibility of timestamp manipulation.
+
+```solidity
+Loan memory loan = Loan({
+    // ...
+    startTimestamp: block.timestamp, // Borrowing timestamp is recorded here
+    // ...
+});
+```
+
+**Impact:** The timestamp manipulation vulnerability can lead to incorrect borrowing timestamps being recorded in the smart contract. As a result, time-sensitive operations, such as calculating interest based on loan start times, determining loan durations, and initiating time-based auctions, can be affected. Inaccurate timestamps may lead to incorrect interest calculations, unintended loan durations, and potential financial losses for both lenders and borrowers.
+
+**Recomended Mitigations:** Using `block.number`, which represents the current block number in the Ethereum blockchain, in combination with `block.timestamp`, can add an additional layer of security.
+
+### [L-6] 
+
 
