@@ -910,7 +910,117 @@ But, there is another condition that will succeed if `block.timestamp` is equal 
 **Reomended Mitigations:** 
 
 
-### [L-7]
+### [L-7] Emitting Incorrect Events
 
+**Description:** The `Lender::refinance` emits incorrect events. The `refinance()` emits incorrect event parameters: `debt` and `collateral`.  Specifically, the `debt` and `collateral` variables in question contain amounts related to the new pool, not the previous pool.
+
+```solidity
+    function refinance(Refinance[] calldata refinances) public {
+        for (uint256 i = 0; i < refinances.length; i++) {
+            ...
+
+            emit Repaid(
+                msg.sender,
+                loan.lender,
+                loanId,
+@>              debt,
+@>              collateral,
+                loan.interestRate,
+                loan.startTimestamp
+            );
+
+            ...
+        }
+    }
+```
+
+**Impact:** The incorrect event logs may cause off-chain services to work in unexpected manner.
+
+**Recommended Mitigation:** Emit the correct variable `loan.debt` and `loan.collateral` to fix the isuues.
+
+### [L-8] Rounding Error In Borrow Function
+
+**Description:** Rounding Errors can lead to fees being Zero 
+
+```solidity
+	// calculate the fees
+	uint256 fees = (debt * borrowerFee) / 10000; 
+````
+
+Example: 
+uint256 fees = (debt * borrowerFee) / 10000 = (10 * 50) / 10000 = 500 / 10000 = 0.05 = 0
+
+**Impact:** Results in Zero Fees
+
+**Recommended Mitigations:** Import & use fixed-point arithmetic math libraries
+
+
+### [L-9] Pausable Tokens
+
+**Description:** Some tokens can be pausable rendering the protocol non-functional. If collateralToken or loanTokens initialized are Pausable tokens such as example WBTC and if paused the Protocol will not function normally. There is no indication loanToken or collateralToken cant be Pausable tokens as any ERC20 can be initialized for pools.
+
+**Impact:**  If the token is paused then transfers of tokens into and out of the protocol are not possible, which impacts ability to deposit, ability to pay back, ability to move loans and all other such related functionality depending on transfer, transferFrom etc functions.
+
+**Recommended Mitigations:** It may be ideal to whitelist allowed tokens for loanToken and collateralTokens and not allow callback, hook, tokens such as ERC777, ERC1363, etc
+
+### [L-10] User Can DOS Pool Lenders Withdrawal
+
+**Description:** Upon a lender attempting to withdraw funds from their pool, a malicious user can front-run them and borrow all liquidity.  Then the user can back-run the pool lender's transaction and repay the loan. Because of the small duration of the loan, the interest is negligible and the pool lender cannot withdraw their funds.
+
+**Impact:** Pool Lender cannot withdraw the funds
+
+**Recommendations:** Add a minimum interest fee, despite the length of the borrow in order to make this attack costly for the attacker.
+
+### [L-10] Borrower can DoS lender's auction.
+
+**Description:** 
+
+A lender could be auctioning a loan. Upon someone attempting to buy the loan, the borrower can just call `refinance` with the same borrow parameters to simply refresh the loan's `auctionStartTimestamp`.
+
+```solidity
+            loans[loanId].startTimestamp = block.timestamp;
+            // update loan auction start timestamp
+            loans[loanId].auctionStartTimestamp = type(uint256).max;
+```
+Now that the value of `auctionStartTimestamp` is refreshed, the call to `buyLoan` will revert due to this line of code:
+
+```solidity
+        if (loan.auctionStartTimestamp == type(uint256).max)
+            revert AuctionNotStarted();
+```
+
+**Impact:** Borrower can DoS their lender's auction.
+
+**Recommended Mitigations:** If a refinance happens to the same pool, do not refresh the value of `auctionStartTimestamp`
+
+
+### [L-11] User can prevent pool owner from changing minLoanSize value and auctionLength
+
+**Description:** As there isn't a separate function to change the values of `minLoanSize` and `auctionLength`, pool owners have to use `setPool` to do so. The problem is that there is the following check:
+
+```solidity
+        if (p.outstandingLoans != pools[poolId].outstandingLoans)
+            revert PoolConfig();
+```
+
+While this makes sure the accounting is correct, it opens up an attack vector. Since this is the only way to change the values of `minLoanSize` and `auctionLength`, a malicious user may be monitoring the mempool for such transactions and front-run them and borrow/ repay in order to change the value of `outstandingLoans`.
+
+By changing it, the transaction will revert. Being able to immediately after repay the taken borrow, the interest accumulated will be negligible. Furthermore, this is an issue which could happen without any malicious actors - if there's high activity in a certain pool, it might be close to impossible to change the values of `minLoanSize` and `auctionLength`.
+
+**Impact:** Pool owners being unable to change the values of `minLoanSize` and `auctionLength`
+
+**Recomended Mitigations:** Make separate functions for changing the values of `minLoanSize` and `auctionLength`.
+
+### [L-12] feeReceiver address is not fixed
+
+**Description:** The `feeReceiver` variable is declared in the constructor by the `msg.sender` it should be initialized with the address of the Fees contract. By not initializing the `feeReceiver` variable, the fees can be sent to the contract owner and not to the Fees.sol contract that allows the exchange of tokens and take it to the staking contract.
+
+With the initialization you had of msg.sender this would not happen.
+
+
+**Impact:** You would not be using the `Fees.sol` and `Staking.sol` contracts, preventing the correct functioning of the `Lender` contract.
+
+
+**Recommeded Mitigations:** 
 
 
