@@ -899,6 +899,18 @@ Loan memory loan = Loan({
 
 **Recomended Mitigations:** Using `block.number`, which represents the current block number in the Ethereum blockchain, in combination with `block.timestamp`, can add an additional layer of security.
 
-### [L-6] 
+### [L-6] Auction Ends Early as Expected
+
+**Description:** The **[seizeLoan](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L548)** function allows users to seize a loan if an auction for them has failed. There is an [if statement](https://github.com/Cyfrin/2023-07-beedle/blob/658e046bda8b010a5b82d2d85e824f3823602d27/src/Lender.sol#L556C13-L556C13) that reverts the transaction if a trial to claim a loan before the end of its auction occurs.
+
+But, there is another condition that will succeed if `block.timestamp` is equal to the end of the auction. 
+
+**Impact:** If an user who wants to buy a loan is backrunned in a block where the timestamp matches the end of the auction, he can end up buying a loan that gets seized by a malicious actor. 
+
+**Reomended Mitigations:** 
+
+
+### [L-7]
+
 
 
