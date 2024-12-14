@@ -192,10 +192,141 @@ to:
 ```
 
 
+### [H-5] Reth poolPrice calculation may OverFlow
+
+**Description:** The Reth derivative contract implements the `poolPrice` function to get the spot price of the derivative asset using a uniswapV3 pool. The function queries the pool to fetch the `sqrtPriceX96` and does the following calculation:
+
+```solidity
+function poolPrice() private view returns (uint256) {
+    address rocketTokenRETHAddress = RocketStorageInterface(
+        ROCKET_STORAGE_ADDRESS
+    ).getAddress(
+            keccak256(
+                abi.encodePacked("contract.address", "rocketTokenRETH")
+            )
+        );
+    IUniswapV3Factory factory = IUniswapV3Factory(UNI_V3_FACTORY);
+    IUniswapV3Pool pool = IUniswapV3Pool(
+        factory.getPool(rocketTokenRETHAddress, W_ETH_ADDRESS, 500)
+    );
+    (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+@>    return (sqrtPriceX96 * (uint(sqrtPriceX96)) * (1e18)) >> (96 * 2);
+}
+```
+
+The main issue here is that the multiplications in the expression `sqrtPriceX96 * (uint(sqrtPriceX96)) * (1e18)` may eventually overflow.
+
+The Process is as follows:
+
+1. Square the sqrtPriceX96 value:
+
+```solidity
+	uint256 squaredPrice = sqrtPriceX96 * sqrtPriceX96;
+```
+
+* Squaring the 96-bit fixed-point value produces a 192-bit fixed-point number (in theory).
+* In practice, this can easily exceed the uint256 limit (especially when sqrtPriceX96 approaches its maximum value).
+
+2. Scale by 1e18:
+
+```solidity
+uint256 scaledPrice = squaredPrice * 1e18;
+```
+
+* Adding another scaling factor (1e18) multiplies the result further, increasing the likelihood of an overflow.
+
+3. Shift down by 96 * 2:
+
+```solidity
+uint256 finalPrice = scaledPrice >> (96 * 2);
+```
+* The final adjustment scales the number back down. However, this occurs after the overflow, so it cannot fix the issue.
 
 
 
+**Impact:** Overflow will result in reverting the function.
 
+**Recommended Mitigations:** Use Chainlink to get price instead of poolPrice.
+
+
+### [H-6] `WstEth::ethPerDerivative` calculates price in terms of StEth instead of Eth.
+
+**Description:** `ethPerDerivative()` is used to determine the derivative's value in terms of ETH:
+
+```solidity
+
+    /**
+        @notice - Get price of derivative in terms of ETH
+     */
+    function ethPerDerivative(uint256 _amount) public view returns (uint256) {
+         //@audit amount is not used in the func
+        return IWStETH(WST_ETH).getStETHByWstETH(10 ** 18); 
+        //@audit not getting in terms of eth but instead wsteth
+        
+    }
+```
+
+As `getStETHByWstETH()` converts `WstETH` to `stETH`, `ethPerDerivative()` returns the price of `WstETH` in terms of `stETH` instead. This might cause loss of assets to users as `ethPerDerivative()` is used in staking calculations.
+
+This assumption also occurs in `withdraw()`:
+
+```solidity
+uint256 stEthBal = IERC20(STETH_TOKEN).balanceOf(address(this));
+IERC20(STETH_TOKEN).approve(LIDO_CRV_POOL, stEthBal);
+uint256 minOut = (stEthBal * (10 ** 18 - maxSlippage)) / 10 ** 18;
+IStEthEthPool(LIDO_CRV_POOL).exchange(1, 0, stEthBal, minOut);
+```
+
+minOut, which represents the minimum ETH received, is calculated by subtracting slippage from the contract's stETH balance. If the price of stETH is low, the amount of ETH received from the swap, and subsequently sent to the user, might be less than intended.
+
+**Impact:** Incorrectly calculate the value in Eth and its being used by functions such as `withdraw`.
+
+**Recommended Mitigations:** Use a price oracle to approximate the rate for converting stETH to ETH.
+
+
+### [H-7] `Staking` and `Unstaking` DOS due to external conditions
+
+**Description:** stake() and unstake() might permanently revert for a prolonged period of time.
+
+In the SafEth contract, `stake()` calls `deposit()` for each dericative in a loop, as such if any deposit() or withdraw() reverts for any derivative, stake() and unstake() will fail. 
+
+```solidity
+for (uint i = 0; i < derivativeCount; i++) {
+    // Some code here...
+    
+    uint256 depositAmount = derivative.deposit{value: ethAmount}();
+    
+    // Some code here...
+}
+```
+
+```solidity
+for (uint256 i = 0; i < derivativeCount; i++) {
+    // Some code here...
+
+    derivatives[i].withdraw(derivativeAmount);
+}
+```
+
+External condition can cause stake() and unstake() to permanently revert for an prolonged period of time, as it is possible for deposit() and withdraw() to revert due to unchecked external conditions:
+
+* Reth
+  * [https://github.com/rocket-pool/rocketpool/blob/master/contracts/contract/deposit/RocketDepositPool.sol#L77](https://github.com/rocket-pool/rocketpool/blob/master/contracts/contract/deposit/RocketDepositPool.sol#L77)
+  * [Withdrawals will fail if rocket pool does not have sufficient ETH.](https://github.com/rocket-pool/rocketpool/blob/master/contracts/contract/token/RocketTokenRETH.sol#L110-L114)
+
+* WstETH
+  * stETH has a daily [staking](https://docs.lido.fi/guides/steth-integration-guide/#staking-rate-limits) limit, which could cause deposits to fail.
+
+If any of the external conditions above occurs, their respecitve function will be DOSed.
+
+
+**Impact:** `stake` and `unstake` might permanently revert for a prolonged period of time.
+
+**Recommended Mitigations:**
+Check for the external conditions mentioned and handle them. For example, swap the staked ETH for derivatives through Uniswap in deposit(), and vice versa for withdraw().
+
+
+### [H-8] 
 
 
 
