@@ -101,6 +101,43 @@ Consider making the following changes to stake():
 2. After the deposit, use the stored values instead of calling ethPerDerivative() again.
 
 
+### [H-3] If the admin adds malfunctioning derivative it results in breaking of the protocol
+
+**Description:** The problem is that if an incorrect address is used to add a new derivative, stake and unstake will revert every time and there's no logic to then remove that derivative. The only solution would be to upgrade the contract to include derivative removal functionality. To avoid this issue, derivative removal functionality should be included in the initial deployment.
+
+**Impact:** Users wont be able to stake/unstake functions of the contract anymore
+
+**Proof Of Code:** 
+
+Both stake and unstake call .balance() on each derivative contract.
+
+```solidity
+// stake() - SafEth.sol:L71-75
+for (uint i = 0; i < derivativeCount; i++)
+	underlyingValue +=
+		(derivatives[i].ethPerDerivative(derivatives[i].balance()) *
+			derivatives[i].balance()) /
+		10 ** 18;
+```
+
+```solidity
+// unstake() - SafEth.sol:L113-116
+for (uint256 i = 0; i < derivativeCount; i++) {
+	// withdraw a percentage of each asset based on the amount of safETH
+	uint256 derivativeAmount = (derivatives[i].balance() *
+		_safEthAmount) / safEthTotalSupply;
+```
+
+If an incorrect address is added for the derivations the above functions will always revert and hence the protocol will stop working as expected.
+
+**Recommended Mitigations:**
+To mitigate the issues associated with adding corrupt, not supported, zero address, or duplicate derivatives, the following approaches can be taken:
+
+1. Allow removal of derivatives: Modify the existing implementation by adding a function that enables the contract owner to remove derivatives from the protocol. This will allow for removing problematic derivatives that may have been accidentally added or are causing issues.
+
+2. Implement positive validation and allow listing: Adopt a positive validation approach, where only whitelisted derivatives can be added to the protocol. Additionally, incorporate ERC165 standard for contract validation to ensure that only valid derivatives are added.
+
+
 
 
 
