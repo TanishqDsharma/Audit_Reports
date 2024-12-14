@@ -138,7 +138,59 @@ To mitigate the issues associated with adding corrupt, not supported, zero addre
 2. Implement positive validation and allow listing: Adopt a positive validation approach, where only whitelisted derivatives can be added to the protocol. Additionally, incorporate ERC165 standard for contract validation to ensure that only valid derivatives are added.
 
 
-### [H-4] 
+### [H-4] Price of `SfrxEth` derivative is calculated incorrectly
+
+**Description:** The goal of the ethPerDerivative() function is to calculate the equivalent amount of ETH for one unit of sfrxETH (a derivative token representing ETH).
+
+The process involves:
+1. Converting 1 sfrxETH to frxETH using convertToAssets(10 ** 18). (Here, 10 ** 18 represents one unit of sfrxETH in its smallest unit.)
+2. Adjusting the frxETH value by price_oracle, which gives the price of frxETH in ETH.
+
+The price_oracle function in the Curve pool provides the exchange rate between frxETH and ETH. It is used to determine the value of frxETH in terms of ETH.
+
+NOTE: The code assumes that price_oracle returns the value of 1 unit of frxETH in ETH (units: frxETH / ETH). But what actually happens is, price_oracle returns the reciprocal value, i.e., the value of 1 unit of ETH in frxETH (units: ETH / frxETH). The protocol will value the sfrxETH derivative token incorrectly. The valuation can either be too low or too high. This leads to accounting errors when calling the SafEth.stake function which is where the ethPerDerivative function is used.
+This means that the amount of SafETH that the user is minted is either too low or too high.
+
+**Impact:** `SfrxEth` derivative is calculated incorrectly which is being used in `stake` and `unstake` functions.
+
+**Proof Of Code:**
+
+1. Let's have a look at the value returned from the price_oracle function from the Curve pool. You can find the current value here: (https://etherscan.io/address/0xa1F8A6807c402E4A15ef4EBa36528A3FED24E577/#readContract) 
+
+Check the value of `price_oracle` in the above webpage, that would be coming approx as 998607137138305022.
+
+2. When looking at the Curve front end swap we can see that for 1 frxETH we get ~ 0.998 ETH:
+
+So, the unit is 0.998 ETH / frxETH.
+
+However, the ethPerDerivative function  performs the following calculation:
+
+```solidity
+return ((10 ** 18 * frxAmount) /
+    IFrxEthEthPool(FRX_ETH_CRV_POOL_ADDRESS).price_oracle());
+```
+
+So say frxAmount is 1e18 then with the above price we get a result that is >1e18. Obviously this is wrong. For 1 frxETH we should get less than 1 ETH (i.e. <1e18).
+
+We can also see this issue by looking at the units of the calculation: frxETH / (ETH / frxETH) = frxETH * (frxETH / ETH) = frxETH^2 / ETH. This is obviously wrong.
+
+The correct calculation would be (IFrxEthEthPool(FRX_ETH_CRV_POOL_ADDRESS).price_oracle() * frxAmount) / 1e18.
+
+**Recommended Mitigations:**
+
+Change these lines:
+
+```solidity
+        return ((10 ** 18 * frxAmount) /
+            IFrxEthEthPool(FRX_ETH_CRV_POOL_ADDRESS).price_oracle());
+```
+
+to:
+
+```solidity
+        return (frxAmount * IFrxEthEthPool(FRX_ETH_CRV_POOL_ADDRESS).price_oracle() / 10 ** 18);
+```
+
 
 
 
