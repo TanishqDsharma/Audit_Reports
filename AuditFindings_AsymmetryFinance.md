@@ -472,5 +472,78 @@ The following scenario can happen:
 
 **Recommended Mitigations:**  The Reth.deposit() function should accept a user-input deadline param that should be passed along to Reth.swapExactInputSingleHop() and ISwapRouter.exactInputSingle().
 
+### [M-5]
+
+**Description:** 
+
+The Purpose of `rebalanceToWeights()`:
+* Withdrawing the full balance from each derivative.
+* Reallocating ETH to the derivatives according to the new weights.
+
+```solidity
+function rebalanceToWeights() external onlyOwner {
+    uint256 ethAmountBefore = address(this).balance; // Records ETH balance before rebalancing.
+    for (uint i = 0; i < derivativeCount; i++) { // Loops through derivatives.
+        if (derivatives[i].balance() > 0) // Checks if a derivative has funds.
+            derivatives[i].withdraw(derivatives[i].balance()); // Fully withdraws from the derivative.
+    }
+    // Re-enter positions based on new weights (code not shown).
+}
+```
+
+The Problem in De-peg Scenarios:
+
+* When one derivative token (e.g., frax-ETH) begins to de-peg, users will likely exchange it for WETH (flight to safety). This triggers a cascading sell pressure across the pool. This lead to below issues:
+  1. Non-Localized Exits:  Instead of exiting only from the de-pegged derivative, the protocol withdraws from all derivative positions, including those not affected by the de-peg. This causes unnecessary sell pressure on non-de-pegged assets, widening slippage and resulting in more losses for depositors.
+  2. Immediate Re-entry into New Positions:After exiting, the protocol immediately reallocates funds to new positions based on updated weights. If the de-peg triggers further instability (e.g., USDT after UST collapse), re-entering the market too quickly may cause additional losses. he protocol exposes depositors to high slippage and gas costs while chasing volatile prices during market stress.
+  3. Inefficient Rebalancing: The protocol fully exits all positions and then re-enters them based on new weights. Even derivatives that don't require rebalancing are unnecessarily exited and re-entered. This creates large, redundant transactions, increasing slippage, gas fees, and execution risks.
+
+
+**Impact:**
+1. Causes unnecessary sell pressure on non-de-pegged assets.
+2. The protocol exposes depositors to high slippage and gas costs while chasing volatile prices during market stress.
+3. This creates large, redundant transactions, increasing slippage, gas fees, and execution risks
+
+
+**Proof Of Code:**
+
+Lets consider an Example Scenario:
+
+Scenario Setup:
+
+The pool consists of three derivatives:
+* frax-ETH: 10% of the portfolio.
+* stETH: 70% of the portfolio.
+* rETH: 20% of the portfolio.
+
+Target weights after a frax-ETH de-peg:
+* stETH: 80%.
+* rETH: 20%.
+
+Current Implementation:
+
+The protocol fully withdraws:
+* 70% stETH.
+* 20% rETH.
+The protocol reallocates ETH based on the new weights:
+* 80% stETH.
+* 20% rETH.
+
+Now, let me explain what have happend above:
+* Only 10% frax-ETH needed to be removed and reallocated.
+  * Instead, the protocol:
+    * Sells the entire pool (including unaffected derivatives).
+    * Reallocates based on new weights.
+  * This incurs significant slippage costs and gas fees, especially in volatile markets where prices fluctuate quickly.
+
+**Recommeded Mitigations:** 
+
+Consider following improvements to rebalanceToWeights:
+
+* Separate exits & entries. Split the functionality to exit and re-enter. In stressed times or fast evolving de-peg scenarios, protocol owners should first ensure an orderly exit. And then wait for markets to settle down before re-entering new positions
+
+* Localize exits, ie. if derivative A is de-pegging, first try to exit that derivative position before incurring exit costs on derivative B and C
+
+* Implement a marginal re-balancing - for protocol's whose weights have increased, avoid exit and re-entry. Instead just increment/decrement based on marginal changes in net positions
 
  
