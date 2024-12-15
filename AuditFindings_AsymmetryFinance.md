@@ -407,7 +407,70 @@ For example:
 * Total supply = 2,000,000
   * _amount = 1
 
-Result: convertToAssets(1)=1×1,000,0002,000,000=0.5convertToAssets(1)=1×2,000,0001,000,000​=0.5, which gets truncated to 0 in integer division. This causes the condition require(assets != 0) to fail, reverting the transaction. The revert from `sFrxEth.withdraw` propagates back to the `unstake` function in SafEth at line 118, causing the entire unstake operation to fail
+Result: 
+convertToAssets(1)=1×1000000/2000000=0.5  which gets truncated to 0 in integer division. 
+
+This causes the condition require(assets != 0) to fail, reverting the transaction. The revert from `sFrxEth.withdraw` propagates back to the `unstake` function in SafEth at line 118, causing the entire unstake operation to fail
 
 **Recommended Mitigations:** In SfrxEth.withdraw check if IsFrxEth(SFRX_ETH_ADDRESS).previewRedeem(_amount) == 0 and simply return if that’s the case.
+
+### [M-3] Stakes get DOSed if the first Staker removes all the tokens and leave every little (1 wei) in the contract
+
+**Description:** A user who is the first staker will be the sole holder of 100% of totalSupply of safETH. They can then unstake (and therefore burn) totalSupply - 1 leaving a total of 1 wei of safETH in circulation.
+
+```solidity
+        uint256 totalSupply = totalSupply();
+        uint256 preDepositPrice; // Price of safETH in regards to ETH
+        if (totalSupply == 0)
+            preDepositPrice = 10 ** 18; // initializes with a price of 1
+        else preDepositPrice = (10 ** 18 * underlyingValue) / totalSupply;
+```
+
+With totalSupply = 1, we see that the above code block will execute the else code path, and that if underlyingValue = 0, then preDepositPrice = 0.
+
+For a simple case, assume there is 1 derivative with 100% weight. Let’s use rETH for this example since the derivative can get its ethPerDerivative price from an AMM. In this case:
+
+Assume the ethPerDerivative() value has been manipulated in the underlying AMM pool such that 1 derivative ETH is worth less than 1 ETH. eg: 1 rETH = 9.99…9e17 ETH
+In this case, also assume that since there is 1 wei of safETH circulating, there should be 1 wei of ETH staked through the protocol, and therefore derivatives[i].balance() = 1 wei.
+
+This case will result in underlyingValue += (9.99...9e17 * 1) / 10 ** 18 = 0.
+
+We can see that it is therefore possible to cause a divide by 0 revert and malfunction of the stake() function.
+
+**Impact:** Potential inability to stake (ie: DoS) if sole safETH user (ie: this would also make them the sole safETH holder) unstakes totalSupply - 1. 
+
+**Recommended Mitigations:** Assuming the deployment process will set up at least 1 derivative with a weight, simply adding a stake() operation of 0.5 ETH as the first depositor as part of the deployment process avoids the case where safETH totalSupply drops to 1 wei.
+
+
+### [M-4] Lack of Deadline for uniswap AMM
+
+**Description:**  The ISwapRouter.exactInputSingle params (used in the rocketpool derivative) does not include a deadline currently.
+
+```solidity
+ISwapRouter.ExactInputSingleParams memory params = ISwapRouter
+    .ExactInputSingleParams({
+        tokenIn: _tokenIn,
+        tokenOut: _tokenOut,
+        fee: _poolFee,
+        recipient: address(this),
+        amountIn: _amountIn,
+        amountOutMinimum: _minOut,
+        sqrtPriceLimitX96: 0
+    });
+```
+
+**Proof Of Code:**
+
+The following scenario can happen:
+
+1. User is staking and some/all the weight is in Reth.
+2. The pool can’t deposit eth, so uniswap will be used to convert eth to weth.
+3. A validator holds the tx until it becomes advantageous due to some market condition (e.g. slippage or running his tx before and frontrun the original user stake).
+4. This could potentially happen to a large amount of stakes, due to widespread usage of bots and MEV.
+
+**Impact:**  Because Front-running is a key aspect of AMM design, deadline is a useful tool to ensure that your tx cannot be “saved for later”.
+
+**Recommended Mitigations:**  The Reth.deposit() function should accept a user-input deadline param that should be passed along to Reth.swapExactInputSingleHop() and ISwapRouter.exactInputSingle().
+
+
  
