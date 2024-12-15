@@ -326,7 +326,60 @@ If any of the external conditions above occurs, their respecitve function will b
 Check for the external conditions mentioned and handle them. For example, swap the staked ETH for derivatives through Uniswap in deposit(), and vice versa for withdraw().
 
 
-### [H-8] 
+# Medium 
+
+### [M-1] Division before Multiplication is observes when calculating `minOut` 
+
+**Description:** When Calcuting the minOut before doing trade, division before multiplication truncate minOut and incurs heavy precision loss, then very sub-optimal amount of the trade output can result in loss of fund from user because of the insufficient slippage protection.
+
+**Impact:** Division before Multiplication leads to precision loss resulting minOut to be `Zero`.
+
+**Proof Of Concept:**
+
+Lets look at the below implementation of setting `slippage` in `Reth.sol`
+
+```solidity
+/**
+	@notice - Owner only function to set max slippage for derivative
+	@param _slippage - new slippage amount in wei
+*/
+function setMaxSlippage(uint256 _slippage) external onlyOwner {
+	maxSlippage = _slippage;
+}
+```
+Now, the above slippage setting affects this code:
+
+```solidity
+@>> uint256 minOut = ((((rethPerEth * msg.value) / 10 ** 18) *
+	((10 ** 18 - maxSlippage))) / 10 ** 18);
+IWETH(W_ETH_ADDRESS).deposit{value: msg.value}();
+uint256 amountSwapped = swapExactInputSingleHop(
+	W_ETH_ADDRESS,
+	rethAddress(),
+	500,
+	msg.value,
+	minOut
+);
+```
+
+Now, from above we can see that `Divsion befoe Multiplication` happens in below line of code:
+
+```solidity
+uint256 minOut = ((((rethPerEth * msg.value) / 10 ** 18) *
+	((10 ** 18 - maxSlippage))) / 10 ** 18);
+```
+
+For example, if maxSlippage is 10 ** 17
+
+(10 ** 18 - 10 ** 17) / (10 ** 18) = 0
+
+Then minOut is 0, slippage control is disabled because of the division before multipcation.
 
 
+**Recommended Mitigations:** Don’t divide before multiply.
 
+
+### [M-2] 
+
+
+ 
