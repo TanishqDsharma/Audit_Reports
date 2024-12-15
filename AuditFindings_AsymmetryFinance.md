@@ -379,7 +379,35 @@ Then minOut is 0, slippage control is disabled because of the division before mu
 **Recommended Mitigations:** Don’t divide before multiply.
 
 
-### [M-2] 
+### [M-2] `sfrxEth` may revert on redeeming non-zero amount
 
+**Description:**  The issue described relates to a revert condition that occurs during the unstaking process due to insufficient precision in asset calculations, potentially leading to a deadlock scenario where users cannot unstake their funds.
 
+**Impact:** Unstake function can get blocked
+
+**Proof Of Concept:**
+
+During the unstake function, the contract withdraws a proportional amount of each derivative's underlying assets to convert the user's safETH into ETH.
+For each derivative (e.g., sFrxEth), the withdraw function of the derivative is called. 
+
+For the sFrxEth derivative, the withdraw function internally calls `IsFrxEth(SFRX_ETH_ADDRESS).redeem(_amount, address(this), address(this));`.
+This function calculates the redeemable assets using `previewRedeem(shares)` before proceeding. If previewRedeem returns 0, the function reverts with the error "ZERO_ASSETS".
+
+This function may revert if `_amount` is low due to the following line in redeem (where _amount is shares):
+* `require((assets = previewRedeem(shares)) != 0, "ZERO_ASSETS");`
+* `previewRedeem(uint256 shares)` returns `convertToAssets(shares)` which is the shares scaled by the division of total assets by total supply:
+   `shares.mulDivDown(totalAssets(), supply)`.
+
+The edge case:
+
+If the _amount i.e the shares, very small (e.g., 1), the result of convertToAssets(shares) can be 0 due to integer division.
+
+For example:
+* Total assets = 1,000,000
+* Total supply = 2,000,000
+  * _amount = 1
+
+Result: convertToAssets(1)=1×1,000,0002,000,000=0.5convertToAssets(1)=1×2,000,0001,000,000​=0.5, which gets truncated to 0 in integer division. This causes the condition require(assets != 0) to fail, reverting the transaction. The revert from `sFrxEth.withdraw` propagates back to the `unstake` function in SafEth at line 118, causing the entire unstake operation to fail
+
+**Recommended Mitigations:** In SfrxEth.withdraw check if IsFrxEth(SFRX_ETH_ADDRESS).previewRedeem(_amount) == 0 and simply return if that’s the case.
  
