@@ -572,4 +572,16 @@ Pools that can be used for rETH/WETH swapping:
 
 **Description:** If the `SafEth` contract is deployed and there are no derivatives added to the contract and a user tries to call the stake function, then this could result in a loss of funds for the user.
 
-Proof of Concept
+**Proof of Concept:**
+
+The following scenario could occur, which would result in the user having their Ether locked in the contract with no way of recovering their funds:
+
+1. user calls the stake function and sends 1 ether to stake
+2. there are no derivatives set in the contract so derivativeCount is 0
+3. this means the for-loop will not run and totalStakeValueEth will equal 0
+4. as a result, the user will be minted 0 safETH erc20 tokens
+5. the stake function call will successfully go through, resulting in the user sending 1 ether to the contract, but receives 0 tokens
+
+**Recommended Mitigations:**
+Consider pausing the staking for the SafEth contract in the initializer function and only unpause the SafEth contract once derivatives have been added.
+
