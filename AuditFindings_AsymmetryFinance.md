@@ -472,7 +472,7 @@ The following scenario can happen:
 
 **Recommended Mitigations:**  The Reth.deposit() function should accept a user-input deadline param that should be passed along to Reth.swapExactInputSingleHop() and ISwapRouter.exactInputSingle().
 
-### [M-5]
+### [M-5] De-Pegs of Derivations can cause high slippage scenarios
 
 **Description:** 
 
@@ -546,4 +546,30 @@ Consider following improvements to rebalanceToWeights:
 
 * Implement a marginal re-balancing - for protocol's whose weights have increased, avoid exit and re-entry. Instead just increment/decrement based on marginal changes in net positions
 
- 
+### [M-6] High Slippage possiblity due to swaps from uniswapV3 `rETH/WETH` pool
+
+**Description:** rETH is acquired using the Uniswap rETH/WETH pool. This solution has higher fees and lower liquidity than alternatives, which results in more lost user value than other solutions.
+
+The Uniswap rETH/WETH pool that is used in Reth.sol to make swaps has a liquidity of $5 million. In comparison, the Balancer rETH/WETH pool has a liquidity of $80 million. Even the Curve rETH/WETH pool has a liquidity of $8 million. The greater liquidity should normally offer lower slippage to users. In addition, the fees to swap with the Balancer pool are only 0.04% compared to Uniswap’s 0.05%. Even the Curve pool offers a lower fee than Uniswap with just a 0.037% fee
+
+One solution to finding the best swap path for rETH is to use RocketPool’s RocketSwapRouter.sol contract swapTo() function. When users visit the RocketPool frontend to swap ETH for rETH, this is the function that RocketPool calls for the user. RocketSwapRouter.sol automatically determines the best way to split the swap between Balancer and Uniswap pools.
+
+```solidity
+ amountOut = ISwapRouter(UNISWAP_ROUTER).exactInputSingle(params);
+```
+
+**Proof Of Code:**
+
+Pools that can be used for rETH/WETH swapping:
+
+* Uniswap rETH/WETH pool: $5 million in liquidity
+* Balancer rETH/WETH pool: $80 million in liquidity
+* Curve Finance rETH/ETH pool: $8 million in liquidity
+
+**Recommended Mitigations:** The best solution is to use the same flow as RocketPool’s frontend UI and to call swapTo() in RocketSwapRouter.sol. An alternative is to modify Reth.sol to use the Balancer rETH/ETH pool for swapping instead of Uniswap’s rETH/WETH pool to better conserve user value by reducing swap fees and reducing slippage costs.
+
+### [M-7] No Derivatives can result in freezing of ETH in stake contract
+
+**Description:** If the `SafEth` contract is deployed and there are no derivatives added to the contract and a user tries to call the stake function, then this could result in a loss of funds for the user.
+
+Proof of Concept
