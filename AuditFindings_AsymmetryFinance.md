@@ -585,3 +585,147 @@ The following scenario could occur, which would result in the user having their 
 **Recommended Mitigations:**
 Consider pausing the staking for the SafEth contract in the initializer function and only unpause the SafEth contract once derivatives have been added.
 
+
+# Low 
+
+### [L-1] Add checks for weight values
+
+**Description:** Currently it’s possible to set any value for the weights. Some combinations for weights could result in issues while calculating ethAmount.
+
+```solidity    function addDerivative(
+        address _contractAddress,
+@>        uint256 _weight
+    ) external onlyOwner {
+        derivatives[derivativeCount] = IDerivative(_contractAddress);
+@>        weights[derivativeCount] = _weight;
+        derivativeCount++;
+	......
+    }
+```
+
+**Proof Of Code:**
+
+Lets consider the below example scenario:
+
+Assuming the minimum value for msg.value, three derivatives and strange values for the weights.
+
+* msg.value = 5e17 = 0.5e18
+* weight1 = 5e17   = 0.5e18
+* weight2 = 19e18  =  19e18
+* weight3 = 19e19  = 190e18
+
+ethAmount = (msg.value * weight) / totalWeight
+
+Putting the above vaules in the formula will get the result: 1193317422434367.5 , which will get round down in solidity.
+
+**Recommeded Mitigations:** 
+
+Add checks for min and max values for weights.
+
+
+### [L-2] Lack of method to remove derivatives
+
+**Description:** `SafEth.sol` doesn't implement any function to remove derivative once added.  
+
+**Recommended Mitigations:** Implement a mechanism to remove a derivative.
+
+### [L-3] Re-entrancy Possiblity in `SafEth.unstake`
+
+**Description:** There is a reentrancy possibility in SafEth.unstake() where the tokens are burned only after the derivative withdraw.
+
+```solidity
+	.........
+        for (uint256 i = 0; i < derivativeCount; i++) {
+            // withdraw a percentage of each asset based on the amount of safETH
+            uint256 derivativeAmount = (derivatives[i].balance() *
+                _safEthAmount) / safEthTotalSupply; //@audit div by zero if totalsupply is zero
+            if (derivativeAmount == 0) continue; // if derivative empty ignore
+@>            derivatives[i].withdraw(derivativeAmount);
+        }
+@>        _burn(msg.sender, _safEthAmount);
+	.........
+```
+
+**Recommended Mitigations:** Call `_burn()` before `derivatives[i].withdraw()` in SafEth.unstake().
+
+### [L-4] Unbounded Loop
+
+**Description:** There are multiple instances of loops executing external calls where the number of iterations is unbounded and controlled by the number of derivatives. This is not an issue on the current setup, since there are only three derivatives.
+
+However, if a large amount of derivative gets added, functionalities like stake() and unstake() could run out of gas and revert.
+
+```solidity
+for (uint i = 0; i < derivativeCount; i++) {
+            uint256 weight = weights[i];
+            IDerivative derivative = derivatives[i];
+            if (weight == 0) continue;
+            uint256 ethAmount = (msg.value * weight) / totalWeight;
+
+            // This is slightly less than ethAmount because slippage
+            uint256 depositAmount = derivative.deposit{value: ethAmount}();
+            uint derivativeReceivedEthValue = (derivative.ethPerDerivative(
+                depositAmount
+            ) * depositAmount) / 10 ** 18;
+            totalStakeValueEth += derivativeReceivedEthValue;
+        }
+```
+
+**Recommended Mitigations:** Limit the maximum number of derivatives that can be added.
+
+### [L-5] Events should be emitted before the external calls
+
+**Description:** Multiple functions in the project emit an event as the last statement. Wherever possible, consider emitting events before external calls. In case of reentrancy, funds are not at risk (for external call + event ordering), however emitting events after external calls can damage frontends and monitoring tools in case of reentrancy attacks.
+
+**Recommended Mitigations:** Emit events before the external calls.
+
+### [L-6] Floating Pragma
+
+**Description:** All contracts in the codebase are having floating pragma.
+
+```solidity
+pragma solidity ^0.8.13;
+```
+
+**Recommended Mitigations:** Use fixed pragma version.
+
+### [L-7] Lack of address(0) checks
+
+**Description:** Input addresses should be checked against address(0) to prevent unexpected behavior.
+
+https://github.com/code-423n4/2023-03-asymmetry/blob/main/contracts/SafEth/derivatives/WstEth.sol#L33-L36
+
+https://github.com/code-423n4/2023-03-asymmetry/blob/main/contracts/SafEth/derivatives/Reth.sol#L42-L45
+
+https://github.com/code-423n4/2023-03-asymmetry/blob/main/contracts/SafEth/derivatives/SfrxEth.sol#L36-L38
+
+
+### [L-8] Don’t allow adding a new derivative when staking/unstaking is paused
+
+**Description:** When the system is in pause mode, e.g. staking and unstaking is blocked, consider adding a check to prevent new derivatives from being added, e.g.
+
+```solidity
+require(!pausedStaking && !pauseUnstaking, "error");
+```
+
+### [L-9] Critical changes should use a two-step pattern and a timelock
+
+**Description:**  Lack of two-step procedure for critical operations leaves them error-prone. Consider adding a two-steps pattern and a timelock on critical changes to avoid modifying the system state.
+
+```solidity
+    function setMaxAmount(uint256 _maxAmount) external onlyOwner {
+        maxAmount = _maxAmount;
+        emit ChangeMaxAmount(maxAmount);
+    }
+```
+
+### [L-10] Lack of events emitted
+
+**Description:** No events are being emitted even when there are critical changes being made
+
+```solidity
+    function setMaxAmount(uint256 _maxAmount) external onlyOwner {
+        maxAmount = _maxAmount;
+        emit ChangeMaxAmount(maxAmount);
+    }
+```
+
